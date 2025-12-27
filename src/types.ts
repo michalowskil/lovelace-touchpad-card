@@ -1,0 +1,30 @@
+import { LovelaceCardConfig } from 'custom-card-helpers';
+
+export interface TouchpadCardConfig extends LovelaceCardConfig {
+  type: string;
+  wsUrl: string;
+  show_lock?: boolean;
+  show_speed_buttons?: boolean;
+  show_status_text?: boolean;
+  sensitivity?: number;
+  scroll_multiplier?: number;
+  invert_scroll?: boolean;
+  double_tap_ms?: number;
+  tap_suppression_px?: number;
+}
+
+export type HaFormSchema =
+  | { name: keyof TouchpadCardConfig; type: 'string'; required?: boolean }
+  | { name: keyof TouchpadCardConfig; type: 'boolean'; default?: boolean }
+  | { name: keyof TouchpadCardConfig; type: 'float'; default?: number; required?: boolean }
+  | { name: keyof TouchpadCardConfig; type: 'integer'; default?: number; required?: boolean };
+
+export type TouchpadMessage =
+  | { t: 'move'; dx: number; dy: number }
+  | { t: 'scroll'; dx: number; dy: number }
+  | { t: 'click' }
+  | { t: 'double_click' }
+  | { t: 'right_click' }
+  | { t: 'down' }
+  | { t: 'up' }
+  | { t: 'wake' };

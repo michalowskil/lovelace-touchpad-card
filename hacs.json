@@ -1,0 +1,5 @@
+{
+  "name": "Lovelace Touchpad Card for Home Assistant",
+  "filename": "touchpad-card.js",
+  "render_readme": true
+}

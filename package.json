@@ -1,0 +1,26 @@
+{
+  "name": "touchpad",
+  "version": "0.1.4",
+  "main": "dist/touchpad-card.js",
+  "scripts": {
+    "build": "node ./scripts/build.js",
+    "dev": "node ./scripts/build.js --watch"
+  },
+  "keywords": [
+    "home-assistant",
+    "lovelace",
+    "custom-card",
+    "touchpad"
+  ],
+  "author": "Custom Touchpad Card",
+  "license": "MIT",
+  "description": "Lovelace Touchpad Card for Home Assistant",
+  "dependencies": {
+    "custom-card-helpers": "^1.9.0",
+    "lit": "^3.3.2"
+  },
+  "devDependencies": {
+    "esbuild": "^0.27.2",
+    "typescript": "^5.9.3"
+  }
+}
