@@ -1,6 +1,6 @@
 {
   "name": "touchpad",
-  "version": "0.1.4",
+  "version": "0.2.0",
   "main": "dist/touchpad-card.js",
   "scripts": {
     "build": "node ./scripts/build.js",
@@ -13,8 +13,8 @@
     "touchpad"
   ],
   "author": "Custom Touchpad Card",
-  "license": "MIT",
-  "description": "Lovelace Touchpad Card for Home Assistant",
+  "license": "CC-BY-NC-ND-4.0",
+  "description": "Control your PC from Home Assistant with a touchpad, keyboard input, and volume controls.",
   "dependencies": {
     "custom-card-helpers": "^1.9.0",
     "lit": "^3.3.2"

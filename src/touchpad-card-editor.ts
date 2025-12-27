@@ -7,6 +7,8 @@ const DEFAULT_FORM_VALUES: Partial<TouchpadCardConfig> = {
   show_lock: true,
   show_speed_buttons: true,
   show_status_text: true,
+  show_audio_controls: true,
+  show_keyboard_button: true,
   sensitivity: 1,
   scroll_multiplier: 1,
   invert_scroll: false,
@@ -32,6 +34,16 @@ const schema: HaFormSchema[] = [
   },
   {
     name: 'show_status_text',
+    type: 'boolean',
+    default: true,
+  },
+  {
+    name: 'show_audio_controls',
+    type: 'boolean',
+    default: true,
+  },
+  {
+    name: 'show_keyboard_button',
     type: 'boolean',
     default: true,
   },
@@ -91,6 +103,10 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
         return 'Show speed multiplier buttons';
       case 'show_status_text':
         return 'Show status text';
+      case 'show_audio_controls':
+        return 'Show audio icons';
+      case 'show_keyboard_button':
+        return 'Show keyboard toggle';
       case 'sensitivity':
         return 'Swipe sensitivity';
       case 'scroll_multiplier':

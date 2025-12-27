@@ -1,7 +1,7 @@
 import { css, html, LitElement, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { HomeAssistant, LovelaceCardEditor } from 'custom-card-helpers';
-import { TouchpadCardConfig, TouchpadMessage } from './types';
+import { KeyCommand, TouchpadCardConfig, TouchpadMessage, VolumeAction } from './types';
 import './touchpad-card-editor';
 
 type PointerGesture = 'move' | 'scroll' | null;
@@ -32,6 +32,8 @@ const DEFAULTS = {
   showLock: true,
   showSpeedButtons: true,
   showStatusText: true,
+  showAudioControls: true,
+  showKeyboardButton: true,
 };
 
 @customElement('touchpad-card')
@@ -43,6 +45,7 @@ export class TouchpadCard extends LitElement {
   @state() private _statusDisplay: 'disconnected' | 'connecting' | 'connected' | 'error' = 'disconnected';
   @state() private _locked = false;
   @state() private _speedMultiplier: 1 | 2 | 3 | 4 = 1;
+  @state() private _keyboardOpen = false;
 
   private socket?: WebSocket;
   private reconnectTimer?: number;
@@ -57,7 +60,6 @@ export class TouchpadCard extends LitElement {
   private lastTapTime = 0;
   private tapTimer?: number;
   private holdTimer?: number;
-  private lastWake = 0;
   private dragPointerId?: number;
   private lockedPan?: LockedPanState;
 
@@ -70,6 +72,8 @@ export class TouchpadCard extends LitElement {
     showLock: DEFAULTS.showLock,
     showSpeedButtons: DEFAULTS.showSpeedButtons,
     showStatusText: DEFAULTS.showStatusText,
+    showAudioControls: DEFAULTS.showAudioControls,
+    showKeyboardButton: DEFAULTS.showKeyboardButton,
   };
 
   public static async getConfigElement(): Promise<LovelaceCardEditor> {
@@ -83,6 +87,8 @@ export class TouchpadCard extends LitElement {
       show_lock: DEFAULTS.showLock,
       show_speed_buttons: DEFAULTS.showSpeedButtons,
       show_status_text: DEFAULTS.showStatusText,
+      show_audio_controls: DEFAULTS.showAudioControls,
+      show_keyboard_button: DEFAULTS.showKeyboardButton,
     };
   }
 
@@ -101,9 +107,14 @@ export class TouchpadCard extends LitElement {
       showLock: config.show_lock ?? DEFAULTS.showLock,
       showSpeedButtons: config.show_speed_buttons ?? DEFAULTS.showSpeedButtons,
       showStatusText: config.show_status_text ?? DEFAULTS.showStatusText,
+      showAudioControls: config.show_audio_controls ?? DEFAULTS.showAudioControls,
+      showKeyboardButton: config.show_keyboard_button ?? DEFAULTS.showKeyboardButton,
     };
 
     this._locked = false;
+    this._keyboardOpen = false;
+    this._speedMultiplier = 1;
+    this.restoreUiState();
     this.connect();
   }
 
@@ -205,6 +216,70 @@ export class TouchpadCard extends LitElement {
     }
   }
 
+  private storageAvailable(): Storage | null {
+    try {
+      const store = window.localStorage;
+      const probe = '__touchpad_probe__';
+      store.setItem(probe, '1');
+      store.removeItem(probe);
+      return store;
+    } catch {
+      return null;
+    }
+  }
+
+  private persistenceKey(): string | null {
+    const ws = this._config?.wsUrl;
+    if (!ws) return null;
+    const appId = navigator?.userAgent ?? 'unknown';
+    const viewId = window?.location?.pathname ?? '';
+    return `touchpad-card:${ws}:${viewId}:${appId}`;
+  }
+
+  private restoreUiState(): void {
+    const store = this.storageAvailable();
+    const key = this.persistenceKey();
+    if (!store || !key) return;
+    try {
+      const raw = store.getItem(key);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as Partial<{
+        locked: boolean;
+        speedMultiplier: number;
+        keyboardOpen: boolean;
+      }>;
+      if (typeof parsed.locked === 'boolean') {
+        this._locked = parsed.locked;
+      }
+      if (parsed.speedMultiplier === 1 || parsed.speedMultiplier === 2 || parsed.speedMultiplier === 3 || parsed.speedMultiplier === 4) {
+        this._speedMultiplier = parsed.speedMultiplier;
+      }
+      if (typeof parsed.keyboardOpen === 'boolean' && this.opts.showKeyboardButton) {
+        this._keyboardOpen = parsed.keyboardOpen;
+      }
+    } catch (err) {
+      console.warn('Failed to restore touchpad UI state', err);
+    }
+  }
+
+  private persistUiState(): void {
+    const store = this.storageAvailable();
+    const key = this.persistenceKey();
+    if (!store || !key) return;
+    try {
+      store.setItem(
+        key,
+        JSON.stringify({
+          locked: this._locked,
+          speedMultiplier: this._speedMultiplier,
+          keyboardOpen: this.opts.showKeyboardButton ? this._keyboardOpen : false,
+        })
+      );
+    } catch (err) {
+      console.warn('Failed to persist touchpad UI state', err);
+    }
+  }
+
   private setStatus(next: 'disconnected' | 'connecting' | 'connected' | 'error'): void {
     this._status = next;
 
@@ -236,7 +311,6 @@ export class TouchpadCard extends LitElement {
     }
     ev.preventDefault();
     this.captureLayer?.setPointerCapture(ev.pointerId);
-    this.wakeHost(true);
 
     const now = performance.now();
     this.pointers.set(ev.pointerId, {
@@ -267,7 +341,6 @@ export class TouchpadCard extends LitElement {
     if (!pointer) return;
 
     ev.preventDefault();
-    this.wakeHost();
 
     const before = this.centroid();
     pointer.x = ev.clientX;
@@ -393,8 +466,8 @@ export class TouchpadCard extends LitElement {
 
     const deltaY = ev.clientY - this.lockedPan.lastY;
     if (deltaY !== 0) {
-      const dir = this.opts.invertScroll ? -1 : 1;
-      window.scrollBy({ top: -deltaY * dir, behavior: 'auto' });
+      // Locked mode always scrolls in the natural finger direction; do not apply invertScroll here.
+      window.scrollBy({ top: -deltaY, behavior: 'auto' });
       this.lockedPan.lastY = ev.clientY;
     }
   }
@@ -507,22 +580,122 @@ export class TouchpadCard extends LitElement {
     }
   }
 
-  private hapticHold(): void {
-    if (navigator?.vibrate) {
-      navigator.vibrate(15);
+  private sendText(text: string): void {
+    if (!this.socket || this.socket.readyState !== WebSocket.OPEN) return;
+    if (!text) return;
+    const msg: TouchpadMessage = { t: 'text', text };
+    try {
+      this.socket.send(JSON.stringify(msg));
+    } catch (err) {
+      console.error('Failed to send text', err);
     }
   }
 
-  private wakeHost(force = false): void {
+  private sendKey(key: KeyCommand): void {
     if (!this.socket || this.socket.readyState !== WebSocket.OPEN) return;
-    const now = performance.now();
-    if (!force && now - this.lastWake < 800) return;
-    this.lastWake = now;
-
+    const msg: TouchpadMessage = { t: 'key', key };
     try {
-      this.socket.send(JSON.stringify({ t: 'wake' }));
+      this.socket.send(JSON.stringify(msg));
     } catch (err) {
-      console.error('Failed to send wake request', err);
+      console.error('Failed to send key', err);
+    }
+  }
+
+  private sendVolume(action: VolumeAction): void {
+    if (!this.socket || this.socket.readyState !== WebSocket.OPEN) return;
+    const msg: TouchpadMessage = { t: 'volume', action };
+    try {
+      this.socket.send(JSON.stringify(msg));
+    } catch (err) {
+      console.error('Failed to send volume action', err);
+    }
+  }
+
+  private handleKeyboardInput = (ev: InputEvent): void => {
+    const target = ev.target as HTMLInputElement;
+    const inputType = ev.inputType;
+    const data = ev.data ?? '';
+
+    if (inputType === 'insertText' && data) {
+      this.sendText(data);
+    } else if (inputType === 'insertLineBreak') {
+      this.sendKey('enter');
+    } else if (inputType === 'insertFromPaste') {
+      const pasted = typeof data === 'string' && data ? data : target.value;
+      if (pasted) {
+        this.sendText(pasted);
+      }
+    }
+  };
+
+  private handleKeyboardKeydown = (ev: KeyboardEvent): void => {
+    const mapped = this.mapKey(ev.key);
+    if (mapped) {
+      const allowNativeEdit = mapped === 'backspace' || mapped === 'delete';
+      if (!allowNativeEdit) {
+        ev.preventDefault();
+      }
+      this.sendKey(mapped);
+      return;
+    }
+
+    if (ev.key === 'AudioVolumeUp' || ev.key === 'VolumeUp') {
+      ev.preventDefault();
+      this.sendVolume('up');
+      return;
+    }
+
+    if (ev.key === 'AudioVolumeDown' || ev.key === 'VolumeDown') {
+      ev.preventDefault();
+      this.sendVolume('down');
+      return;
+    }
+
+    if (ev.key === 'AudioVolumeMute' || ev.key === 'VolumeMute') {
+      ev.preventDefault();
+      this.sendVolume('mute');
+    }
+  };
+
+  private mapKey(key: string): KeyCommand | null {
+    switch (key) {
+      case 'Enter':
+        return 'enter';
+      case 'Backspace':
+        return 'backspace';
+      case 'Escape':
+        return 'escape';
+      case 'Tab':
+        return 'tab';
+      case 'Delete':
+        return 'delete';
+      case ' ':
+      case 'Spacebar':
+        return 'space';
+      case 'ArrowLeft':
+        return 'arrow_left';
+      case 'ArrowRight':
+        return 'arrow_right';
+      case 'ArrowUp':
+        return 'arrow_up';
+      case 'ArrowDown':
+        return 'arrow_down';
+      case 'Home':
+        return 'home';
+      case 'End':
+        return 'end';
+      case 'PageUp':
+        return 'page_up';
+      case 'PageDown':
+        return 'page_down';
+      default:
+        return null;
+    }
+  }
+
+  private hapticHold(): void {
+    if (navigator?.vibrate) {
+      navigator.vibrate(15);
     }
   }
 
@@ -534,10 +707,24 @@ export class TouchpadCard extends LitElement {
     this.cancelHoldTimer();
     this.lockedPan = undefined;
     this._locked = !this._locked;
+    this.persistUiState();
+  };
+
+  private toggleKeyboardPanel = (): void => {
+    if (!this.opts.showKeyboardButton) return;
+    this._keyboardOpen = !this._keyboardOpen;
+    this.persistUiState();
+    if (this._keyboardOpen) {
+      window.setTimeout(() => {
+        const input = this.renderRoot?.querySelector('.keyboard-input') as HTMLInputElement | null;
+        input?.focus();
+      }, 0);
+    }
   };
 
   private toggleSpeed(mult: 2 | 3 | 4): void {
     this._speedMultiplier = this._speedMultiplier === mult ? 1 : mult;
+    this.persistUiState();
   }
 
   private statusLabel(): string {
@@ -556,9 +743,11 @@ export class TouchpadCard extends LitElement {
   protected render() {
     if (!this._config) return nothing;
 
+    const showKeyboardSection = this.opts.showKeyboardButton && this._keyboardOpen;
+
     return html`
       <ha-card @contextmenu=${(e: Event) => e.preventDefault()}>
-        <div class="surface ${this._locked ? 'locked' : ''}">
+        <div class="surface ${this._locked ? 'locked' : ''} ${showKeyboardSection ? 'with-keyboard' : ''}">
           ${this.opts.showSpeedButtons
             ? html`<div class="speed-buttons">
                 ${[2, 3, 4].map(
@@ -585,6 +774,28 @@ export class TouchpadCard extends LitElement {
                 LOCK
               </button>`
             : nothing}
+          ${this.opts.showAudioControls
+            ? html`<div class="audio-stack">
+                <button class="icon-btn" title="Volume up" @click=${() => this.sendVolume('up')}>
+                  <ha-icon icon="mdi:volume-plus"></ha-icon>
+                </button>
+                <button class="icon-btn" title="Volume down" @click=${() => this.sendVolume('down')}>
+                  <ha-icon icon="mdi:volume-minus"></ha-icon>
+                </button>
+                <button class="icon-btn" title="Mute" @click=${() => this.sendVolume('mute')}>
+                  <ha-icon icon="mdi:volume-mute"></ha-icon>
+                </button>
+              </div>`
+            : nothing}
+          ${this.opts.showKeyboardButton
+            ? html`<button
+                class="keyboard-toggle ${this._keyboardOpen ? 'active' : ''}"
+                title="Keyboard"
+                @click=${this.toggleKeyboardPanel}
+              >
+                <ha-icon icon="mdi:keyboard-outline"></ha-icon>
+              </button>`
+            : nothing}
           <div
             class="capture"
             @pointerdown=${this.handlePointerDown}
@@ -600,6 +811,37 @@ export class TouchpadCard extends LitElement {
               </div>`
             : nothing}
         </div>
+        ${showKeyboardSection
+          ? html`<div class="controls">
+                  <div class="left-panel">
+                    <input
+                      class="keyboard-input"
+                      type="text"
+                      inputmode="text"
+                      autocomplete="off"
+                      autocorrect="off"
+                      autocapitalize="none"
+                      spellcheck="false"
+                      placeholder="Tap to type on PC"
+                      @input=${this.handleKeyboardInput}
+                      @keydown=${this.handleKeyboardKeydown}
+                    />
+                    <button class="pill" @click=${() => this.sendKey('tab')}>Tab</button>
+                    <button class="pill" @click=${() => this.sendKey('escape')}>Esc</button>
+                    <button class="pill" @click=${() => this.sendKey('delete')}>Del</button>
+                    <button class="pill" @click=${() => this.sendKey('home')}>Home</button>
+                    <button class="pill" @click=${() => this.sendKey('end')}>End</button>
+                    <button class="pill" @click=${() => this.sendKey('page_up')}>PgUp</button>
+                    <button class="pill" @click=${() => this.sendKey('page_down')}>PgDown</button>
+                  </div>
+                  <div class="right-panel">
+                    <button class="pill arrow arrow-up" @click=${() => this.sendKey('arrow_up')} title="Arrow up">↑</button>
+                    <button class="pill arrow arrow-left" @click=${() => this.sendKey('arrow_left')} title="Arrow left">←</button>
+                    <button class="pill arrow arrow-down" @click=${() => this.sendKey('arrow_down')} title="Arrow down">↓</button>
+                    <button class="pill arrow arrow-right" @click=${() => this.sendKey('arrow_right')} title="Arrow right">→</button>
+                  </div>
+            </div>`
+          : nothing}
       </ha-card>
     `;
   }
@@ -607,6 +849,10 @@ export class TouchpadCard extends LitElement {
   static styles = css`
     :host {
       display: block;
+      --control-height: 36px;
+      --arrow-size: var(--control-height);
+      --arrow-gap: 8px;
+      --arrow-cluster-width: calc(var(--arrow-size) * 3 + var(--arrow-gap) * 2);
     }
 
     ha-card {
@@ -624,6 +870,11 @@ export class TouchpadCard extends LitElement {
       touch-action: none;
     }
 
+    .surface.with-keyboard {
+      border-bottom-left-radius: 0;
+      border-bottom-right-radius: 0;
+    }
+
     .surface.locked {
       touch-action: pan-y;
     }
@@ -632,6 +883,7 @@ export class TouchpadCard extends LitElement {
       position: absolute;
       inset: 0;
       touch-action: none;
+      z-index: 1;
     }
 
     .surface.locked .capture {
@@ -653,6 +905,7 @@ export class TouchpadCard extends LitElement {
       border-radius: 10px;
       cursor: pointer;
       transition: all 140ms ease;
+      z-index: 2;
     }
 
     .lock.active {
@@ -697,6 +950,180 @@ export class TouchpadCard extends LitElement {
       border-color: rgba(255, 152, 0, 0.5);
       box-shadow: 0 0 0 1px rgba(255, 152, 0, 0.2);
     }
+
+    .audio-stack {
+      position: absolute;
+      right: 12px;
+      top: 50%;
+      transform: translateY(-50%);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      z-index: 3;
+    }
+
+    .icon-btn {
+      width: 38px;
+      height: 38px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 12px;
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      background: rgba(255, 255, 255, 0.04);
+      color: #e5ecff;
+      cursor: pointer;
+      font-size: 16px;
+      transition: all 140ms ease;
+    }
+
+    .icon-btn:hover {
+      border-color: rgba(255, 255, 255, 0.32);
+      background: rgba(255, 255, 255, 0.12);
+    }
+
+    .icon-btn:active {
+      transform: scale(0.96);
+    }
+
+    .keyboard-toggle {
+      position: absolute;
+      left: 12px;
+      top: 50%;
+      transform: translateY(-50%);
+      z-index: 3;
+      width: 44px;
+      height: 44px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 14px;
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      background: rgba(255, 255, 255, 0.05);
+      color: #9ea7b7;
+      cursor: pointer;
+      font-size: 17px;
+      transition: all 140ms ease;
+    }
+
+    .keyboard-toggle:hover {
+      border-color: rgba(255, 255, 255, 0.32);
+      color: #e5ecff;
+    }
+
+    .keyboard-toggle.active {
+      color: #ff9800;
+      border-color: rgba(255, 152, 0, 0.5);
+      box-shadow: 0 0 0 1px rgba(255, 152, 0, 0.2);
+    }
+    .icon-btn ha-icon,
+    .keyboard-toggle ha-icon {
+      width: 20px;
+      height: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: inherit;
+      --mdc-icon-size: 20px;
+    }
+    .controls {
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+      padding: 12px 14px 14px;
+      background: #161c29;
+      border-top: 1px solid rgba(255, 255, 255, 0.06);
+      border-bottom-left-radius: 12px;
+      border-bottom-right-radius: 12px;
+    }
+    .left-panel {
+      flex: 1 1 0;
+      min-width: 0;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: flex-start;
+    }
+    .left-panel .keyboard-input {
+      flex: 1 1 100%;
+      min-width: 0;
+      height: var(--control-height);
+      width: auto;
+      box-sizing: border-box;
+      padding: 0 10px;
+    }
+    .left-panel .pill {
+      flex: 0 0 auto;
+      height: var(--control-height);
+      padding: 0 12px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .right-panel {
+      flex: 0 0 var(--arrow-cluster-width);
+      display: grid;
+      grid-template-columns: repeat(3, var(--arrow-size));
+      grid-template-rows: repeat(2, var(--arrow-size));
+      gap: var(--arrow-gap);
+      justify-items: center;
+      align-items: center;
+      margin-left: 10px;
+      align-self: flex-start;
+    }
+    .pill.arrow {
+      width: var(--arrow-size);
+      height: var(--arrow-size);
+      padding: 0;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+      line-height: 1;
+    }
+    .arrow-up {
+      grid-column: 2;
+      grid-row: 1;
+    }
+    .arrow-left {
+      grid-column: 1;
+      grid-row: 2;
+    }
+    .arrow-down {
+      grid-column: 2;
+      grid-row: 2;
+    }
+    .arrow-right {
+      grid-column: 3;
+      grid-row: 2;
+    }
+    .pill {
+      padding: 8px 12px;
+      font-size: 13px;
+      border-radius: 10px;
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      background: rgba(255, 255, 255, 0.05);
+      color: #e5ecff;
+      cursor: pointer;
+      transition: all 140ms ease;
+    }
+    .pill:hover {
+      border-color: rgba(255, 255, 255, 0.32);
+      background: rgba(255, 255, 255, 0.12);
+    }
+    .keyboard-input {
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      background: rgba(255, 255, 255, 0.04);
+      color: #f5f5f5;
+      font-size: 14px;
+      outline: none;
+    }
+    .keyboard-input:focus {
+      border-color: rgba(255, 255, 255, 0.32);
+      box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08);
+    }
   `;
 }
 
@@ -714,6 +1141,6 @@ if (!window.customCards.find((c) => c.type === 'touchpad-card')) {
   window.customCards.push({
     type: 'touchpad-card',
     name: 'Lovelace Touchpad Card',
-    description: 'Use this card like a real touchpad on your computer.',
+    description: 'Control your PC from Home Assistant with a touchpad, keyboard input, and volume controls.',
   });
 }

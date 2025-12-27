@@ -1,4 +1,7 @@
 """
+https://michalowskil.github.io/lovelace-touchpad-card/
+LICENSE: CC BY-NC-ND 4.0
+
 Simple WebSocket listener that injects mouse events on Windows using SendInput.
 
 Messages expected from the Lovelace card (JSON):
@@ -21,7 +24,7 @@ from typing import Any, Dict
 
 import websockets
 from websockets.exceptions import ConnectionClosedError, ConnectionClosedOK
-from websockets.server import WebSocketServerProtocol
+from websockets.server import ServerConnection
 
 try:
     import ctypes
@@ -41,6 +44,7 @@ logging.getLogger("websockets.client").setLevel(logging.WARNING)
 
 # Constants for SendInput
 INPUT_MOUSE = 0
+INPUT_KEYBOARD = 1
 MOUSEEVENTF_MOVE = 0x0001
 MOUSEEVENTF_LEFTDOWN = 0x0002
 MOUSEEVENTF_LEFTUP = 0x0004
@@ -50,7 +54,26 @@ MOUSEEVENTF_WHEEL = 0x0800
 MOUSEEVENTF_HWHEEL = 0x01000
 WHEEL_DELTA = 120
 KEYEVENTF_KEYUP = 0x0002
-VK_CONTROL = 0x11
+KEYEVENTF_UNICODE = 0x0004
+VK_VOLUME_MUTE = 0x00AD
+VK_VOLUME_DOWN = 0x00AE
+VK_VOLUME_UP = 0x00AF
+KEY_MAP = {
+    "enter": 0x000D,
+    "backspace": 0x0008,
+    "escape": 0x001B,
+    "tab": 0x0009,
+    "space": 0x0020,
+    "delete": 0x002E,
+    "arrow_left": 0x0025,
+    "arrow_right": 0x0027,
+    "arrow_up": 0x0026,
+    "arrow_down": 0x0028,
+    "home": 0x0024,
+    "end": 0x0023,
+    "page_up": 0x0021,
+    "page_down": 0x0022,
+}
 
 
 class MOUSEINPUT(ctypes.Structure):
@@ -64,8 +87,18 @@ class MOUSEINPUT(ctypes.Structure):
     ]
 
 
+class KEYBDINPUT(ctypes.Structure):
+    _fields_ = [
+        ("wVk", wintypes.WORD),
+        ("wScan", wintypes.WORD),
+        ("dwFlags", wintypes.DWORD),
+        ("time", wintypes.DWORD),
+        ("dwExtraInfo", ULONG_PTR),
+    ]
+
+
 class _INPUTUNION(ctypes.Union):
-    _fields_ = [("mi", MOUSEINPUT)]
+    _fields_ = [("mi", MOUSEINPUT), ("ki", KEYBDINPUT)]
 
 
 class INPUT(ctypes.Structure):
@@ -73,7 +106,6 @@ class INPUT(ctypes.Structure):
 
 
 SendInput = ctypes.windll.user32.SendInput
-keybd_event = ctypes.windll.user32.keybd_event
 
 
 def _send_mouse_input(flags: int, dx: int = 0, dy: int = 0, data: int = 0) -> None:
@@ -82,6 +114,14 @@ def _send_mouse_input(flags: int, dx: int = 0, dy: int = 0, data: int = 0) -> No
     result = SendInput(1, ctypes.byref(inp), ctypes.sizeof(inp))
     if result != 1:
         logging.warning("SendInput failed (%s)", ctypes.GetLastError())
+
+
+def _send_keyboard_input(vk: int, flags: int = 0, scan: int = 0) -> None:
+    ki = KEYBDINPUT(vk, scan, flags, 0, 0)
+    inp = INPUT(INPUT_KEYBOARD, _INPUTUNION(ki=ki))
+    result = SendInput(1, ctypes.byref(inp), ctypes.sizeof(inp))
+    if result != 1:
+        logging.warning("SendInput (keyboard) failed (%s)", ctypes.GetLastError())
 
 
 class InputInjector:
@@ -128,15 +168,38 @@ class InputInjector:
         await asyncio.sleep(0.03)
         self.click()
 
-    def wake(self) -> None:
-        # Try both a small mouse wiggle and a modifier key tap to break screensavers/lock screens.
-        _send_mouse_input(MOUSEEVENTF_MOVE, 2, 0)
-        _send_mouse_input(MOUSEEVENTF_MOVE, -2, 0)
-        keybd_event(VK_CONTROL, 0, 0, 0)
-        keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0)
+    def type_text(self, text: str) -> None:
+        for ch in text:
+            if ch == "\n":
+                self.press_key("enter")
+                continue
+            codepoint = ord(ch)
+            _send_keyboard_input(0, scan=codepoint, flags=KEYEVENTF_UNICODE)
+            _send_keyboard_input(0, scan=codepoint, flags=KEYEVENTF_UNICODE | KEYEVENTF_KEYUP)
+
+    def press_key(self, key: str) -> None:
+        vk = KEY_MAP.get(key)
+        if vk is None:
+            logging.warning("Unknown key command: %s", key)
+            return
+        _send_keyboard_input(vk)
+        _send_keyboard_input(vk, flags=KEYEVENTF_KEYUP)
+
+    def adjust_volume(self, action: str) -> None:
+        vk_lookup = {
+            "up": VK_VOLUME_UP,
+            "down": VK_VOLUME_DOWN,
+            "mute": VK_VOLUME_MUTE,
+        }
+        vk = vk_lookup.get(action)
+        if vk is None:
+            logging.warning("Unknown volume action: %s", action)
+            return
+        _send_keyboard_input(vk)
+        _send_keyboard_input(vk, flags=KEYEVENTF_KEYUP)
 
 
-async def handle_client(ws: WebSocketServerProtocol, injector: InputInjector) -> None:
+async def handle_client(ws: ServerConnection, injector: InputInjector) -> None:
     logging.info("Client connected: %s", ws.remote_address)
     try:
         async for message in ws:
@@ -160,8 +223,18 @@ async def handle_client(ws: WebSocketServerProtocol, injector: InputInjector) ->
                 injector.left_down()
             elif msg_type == "up":
                 injector.left_up()
-            elif msg_type == "wake":
-                injector.wake()
+            elif msg_type == "text":
+                text = data.get("text", "")
+                if isinstance(text, str) and text:
+                    injector.type_text(text)
+            elif msg_type == "key":
+                key = data.get("key")
+                if isinstance(key, str):
+                    injector.press_key(key)
+            elif msg_type == "volume":
+                action = data.get("action")
+                if isinstance(action, str):
+                    injector.adjust_volume(action)
     except (ConnectionClosedError, ConnectionClosedOK) as err:
         logging.info(
             "Client closed: %s code=%s reason=%s",

@@ -142,3 +142,5 @@ git_tag_message.md
 zrob-release.bat
 
 backend/build/
+__pycache__
+webos_client_key.json

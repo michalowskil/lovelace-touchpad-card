@@ -6,6 +6,8 @@ export interface TouchpadCardConfig extends LovelaceCardConfig {
   show_lock?: boolean;
   show_speed_buttons?: boolean;
   show_status_text?: boolean;
+  show_audio_controls?: boolean;
+  show_keyboard_button?: boolean;
   sensitivity?: number;
   scroll_multiplier?: number;
   invert_scroll?: boolean;
@@ -19,6 +21,24 @@ export type HaFormSchema =
   | { name: keyof TouchpadCardConfig; type: 'float'; default?: number; required?: boolean }
   | { name: keyof TouchpadCardConfig; type: 'integer'; default?: number; required?: boolean };
 
+export type KeyCommand =
+  | 'enter'
+  | 'backspace'
+  | 'escape'
+  | 'tab'
+  | 'space'
+  | 'delete'
+  | 'arrow_left'
+  | 'arrow_right'
+  | 'arrow_up'
+  | 'arrow_down'
+  | 'home'
+  | 'end'
+  | 'page_up'
+  | 'page_down';
+
+export type VolumeAction = 'up' | 'down' | 'mute';
+
 export type TouchpadMessage =
   | { t: 'move'; dx: number; dy: number }
   | { t: 'scroll'; dx: number; dy: number }
@@ -27,4 +47,6 @@ export type TouchpadMessage =
   | { t: 'right_click' }
   | { t: 'down' }
   | { t: 'up' }
-  | { t: 'wake' };
+  | { t: 'text'; text: string }
+  | { t: 'key'; key: KeyCommand }
+  | { t: 'volume'; action: VolumeAction };
