@@ -2,4 +2,4 @@
 set -eu
 
 cd /opt/webos-bridge
-exec python3 -u run_addon.py
+exec /opt/webos-bridge/venv/bin/python -u run_addon.py
