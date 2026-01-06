@@ -56,6 +56,7 @@ Add the card in the UI and configure everything from the visual editor.
    `https://github.com/michalowskil/lovelace-touchpad-card`.
 2. Install **webOS Pointer Bridge** from the add-on list.
 3. Open the add-on configuration and list your TVs. Example:
+
    ```yaml
    tvs:
      - name: livingroom
@@ -68,6 +69,7 @@ Add the card in the UI and configure everything from the visual editor.
        listen_port: 8778
        use_ssl: true
    ```
+
    - `listen_port` is where the Lovelace card connects. The add-on runs in host network, so use your HA host IP.
    - Client keys are stored per TV in `/data/keys/<name>.json` and survive restarts.
    - `origin` is optional; leave it unset/empty unless your TV rejects the default. If needed, set it to `https://www.lge.com`, or to `""` to send no Origin header.
