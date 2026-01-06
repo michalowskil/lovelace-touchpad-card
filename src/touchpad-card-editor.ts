@@ -4,6 +4,7 @@ import { fireEvent, HomeAssistant, LovelaceCardEditor } from 'custom-card-helper
 import { HaFormSchema, TouchpadCardConfig } from './types';
 
 const DEFAULT_FORM_VALUES: Partial<TouchpadCardConfig> = {
+  backend: 'pc',
   show_lock: true,
   show_speed_buttons: true,
   show_status_text: true,
@@ -21,6 +22,18 @@ const schema: HaFormSchema[] = [
     name: 'wsUrl',
     type: 'string',
     required: true,
+  },
+  {
+    name: 'backend',
+    type: 'string',
+    selector: {
+      select: {
+        options: [
+          { value: 'pc', label: 'PC backend' },
+          { value: 'webos', label: 'LG webOS backend' },
+        ],
+      },
+    },
   },
   {
     name: 'show_lock',
@@ -96,7 +109,9 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
   private _computeLabel = (field: HaFormSchema): string => {
     switch (field.name) {
       case 'wsUrl':
-        return 'WebSocket URL (PC listener)';
+        return 'WebSocket URL (backend listener)';
+      case 'backend':
+        return 'Backend type';
       case 'show_lock':
         return 'Show LOCK button';
       case 'show_speed_buttons':

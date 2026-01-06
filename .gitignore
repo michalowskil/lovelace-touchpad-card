@@ -143,4 +143,4 @@ zrob-release.bat
 
 backend/build/
 __pycache__
-webos_client_key.json
+webos_client_key_*.json

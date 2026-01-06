@@ -3,6 +3,7 @@ import { LovelaceCardConfig } from 'custom-card-helpers';
 export interface TouchpadCardConfig extends LovelaceCardConfig {
   type: string;
   wsUrl: string;
+  backend?: 'pc' | 'webos';
   show_lock?: boolean;
   show_speed_buttons?: boolean;
   show_status_text?: boolean;
@@ -16,7 +17,7 @@ export interface TouchpadCardConfig extends LovelaceCardConfig {
 }
 
 export type HaFormSchema =
-  | { name: keyof TouchpadCardConfig; type: 'string'; required?: boolean }
+  | { name: keyof TouchpadCardConfig; type: 'string'; required?: boolean; selector?: { select: { options: Array<{ value: string; label: string }> } } }
   | { name: keyof TouchpadCardConfig; type: 'boolean'; default?: boolean }
   | { name: keyof TouchpadCardConfig; type: 'float'; default?: number; required?: boolean }
   | { name: keyof TouchpadCardConfig; type: 'integer'; default?: number; required?: boolean };
@@ -25,6 +26,7 @@ export type KeyCommand =
   | 'enter'
   | 'backspace'
   | 'escape'
+  | 'back'
   | 'tab'
   | 'space'
   | 'delete'
@@ -35,7 +37,9 @@ export type KeyCommand =
   | 'home'
   | 'end'
   | 'page_up'
-  | 'page_down';
+  | 'page_down'
+  | 'power'
+  | 'settings';
 
 export type VolumeAction = 'up' | 'down' | 'mute';
 

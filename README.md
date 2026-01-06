@@ -1,7 +1,6 @@
 [![Forum](https://img.shields.io/badge/dynamic/json?style=flat&label=Forum&color=41BDF5&logo=homeassistant&logoColor=white&suffix=%20posts&url=https://community.home-assistant.io/t/lovelace-touchpad-card-for-home-assistant-windows-os-touchpad/966857.json&query=$.posts_count)](https://community.home-assistant.io/t/lovelace-touchpad-card-for-home-assistant-windows-os-touchpad/966857)
 [![GitHub Discussions](https://img.shields.io/github/discussions/michalowskil/lovelace-touchpad-card?logo=github&logoColor=white&label=Discussions)](https://github.com/michalowskil/lovelace-touchpad-card/discussions)
 [![Downloads](https://img.shields.io/github/downloads/michalowskil/lovelace-touchpad-card/total?label=Downloads&logo=github)](https://github.com/michalowskil/lovelace-touchpad-card/releases)
-[![Latest release downloads](https://img.shields.io/github/downloads/michalowskil/lovelace-touchpad-card/latest/total?label=Latest%20downloads&logo=github)](https://github.com/michalowskil/lovelace-touchpad-card/releases/latest)
 
 # Lovelace Touchpad Card for Home Assistant
 
@@ -50,6 +49,30 @@ Add the card in the UI and configure everything from the visual editor.
    - Host and port are optional, if you omit them, the defaults are `0.0.0.0` and `8765` as shown.
 3. Keep the window open while using the card. Allow it through Windows Firewall on first run.
 4. Optional: add a shortcut to Startup or create a scheduled task for auto-start.
+
+## webOS backend (Home Assistant add-on)
+
+1. In Home Assistant go to **Settings -> Add-ons -> Add-on store -> ... -> Repositories** and add  
+   `https://github.com/michalowskil/lovelace-touchpad-card`.
+2. Install **webOS Pointer Bridge** from the add-on list.
+3. Open the add-on configuration and list your TVs. Example:
+   ```yaml
+   tvs:
+     - name: livingroom
+       host: 192.168.0.129
+       listen_port: 8777
+       tv_port: 3001
+       use_ssl: true
+       origin: https://webostv.developer.lge.com
+     - name: bedroom
+       host: 192.168.0.6
+       listen_port: 8778
+       use_ssl: true
+   ```
+   - `listen_port` is where the Lovelace card connects. The add-on runs in host network, so use your HA host IP.
+   - Client keys are stored per TV in `/data/keys/<name>.json` and survive restarts.
+4. Start the add-on and enable **Start on boot** and **Watchdog** if desired.
+5. In each touchpad card set `wsUrl` to the matching port (for example `ws://homeassistant.local:8777`).
 
 ## Notes
 - Card sends deltas in `requestAnimationFrame` (throttled); backend accumulates scroll into wheel steps.

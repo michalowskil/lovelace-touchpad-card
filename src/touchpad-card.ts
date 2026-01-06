@@ -22,8 +22,38 @@ interface LockedPanState {
 
 const HOLD_DELAY_MS = 320;
 const HOLD_CANCEL_PX = 3;
+const RECONNECT_BASE_MS = 1500;
+const RECONNECT_MAX_MS = 15000;
+
+const LOG_PREFIX = 'LOVELACE-TOUCHPAD-CARD';
+const LOG_TAG_STYLE = 'background:#1976d2;color:#fff;font-weight:700;padding:2px 6px;border-radius:6px;';
+const LOG_TEXT_STYLE = 'color:#1976d2;font-weight:600;';
+
+function logCardError(message: string, detail?: unknown): void {
+  const label = `%c${LOG_PREFIX}%c ${message}`;
+  if (detail !== undefined) {
+    console.groupCollapsed(label, LOG_TAG_STYLE, LOG_TEXT_STYLE);
+    console.log(detail);
+    console.trace();
+    console.groupEnd();
+    return;
+  }
+  console.error(label, LOG_TAG_STYLE, LOG_TEXT_STYLE);
+}
+
+function logCardWarn(message: string, detail?: unknown): void {
+  const label = `%c${LOG_PREFIX}%c ${message}`;
+  if (detail !== undefined) {
+    console.groupCollapsed(label, LOG_TAG_STYLE, LOG_TEXT_STYLE);
+    console.warn(detail);
+    console.groupEnd();
+    return;
+  }
+  console.warn(label, LOG_TAG_STYLE, LOG_TEXT_STYLE);
+}
 
 const DEFAULTS = {
+  backend: 'pc' as 'pc' | 'webos',
   sensitivity: 1,
   scrollMultiplier: 1,
   invertScroll: false,
@@ -52,6 +82,8 @@ export class TouchpadCard extends LitElement {
   private rafHandle?: number;
   private statusTimer?: number;
   private detachTimer?: number;
+  private wsErrorNotified = false;
+  private reconnectDelayMs = RECONNECT_BASE_MS;
 
   private pointers = new Map<number, PointerState>();
   private gesture: PointerGesture = null;
@@ -64,6 +96,7 @@ export class TouchpadCard extends LitElement {
   private lockedPan?: LockedPanState;
 
   private opts = {
+    backend: DEFAULTS.backend,
     sensitivity: DEFAULTS.sensitivity,
     scrollMultiplier: DEFAULTS.scrollMultiplier,
     invertScroll: DEFAULTS.invertScroll,
@@ -84,6 +117,7 @@ export class TouchpadCard extends LitElement {
     return {
       type: 'custom:touchpad-card',
       wsUrl: 'ws://YOUR-PC-LAN-IP:8765',
+      backend: DEFAULTS.backend,
       show_lock: DEFAULTS.showLock,
       show_speed_buttons: DEFAULTS.showSpeedButtons,
       show_status_text: DEFAULTS.showStatusText,
@@ -99,6 +133,7 @@ export class TouchpadCard extends LitElement {
 
     this._config = config;
     this.opts = {
+      backend: config.backend === 'webos' ? 'webos' : DEFAULTS.backend,
       sensitivity: config.sensitivity ?? DEFAULTS.sensitivity,
       scrollMultiplier: config.scroll_multiplier ?? DEFAULTS.scrollMultiplier,
       invertScroll: config.invert_scroll ?? DEFAULTS.invertScroll,
@@ -166,16 +201,19 @@ export class TouchpadCard extends LitElement {
     }
 
     this.setStatus('connecting');
+    this.wsErrorNotified = false;
     try {
       this.socket = new WebSocket(this._config.wsUrl);
     } catch (err) {
-      console.error(err);
+      logCardError('Failed to initialize WebSocket connection. Check backend.', err);
       this.setStatus('error');
       return;
     }
 
     this.socket.addEventListener('open', () => {
       this._connected = true;
+      this.wsErrorNotified = false;
+      this.reconnectDelayMs = RECONNECT_BASE_MS;
       this.setStatus('connected');
       this.requestUpdate();
     });
@@ -188,21 +226,27 @@ export class TouchpadCard extends LitElement {
     });
 
     this.socket.addEventListener('error', (event) => {
-      console.error('WebSocket error', event);
+      const backendLabel = this.opts.backend === 'webos' ? 'webOS' : 'Windows';
+      if (!this.wsErrorNotified) {
+        logCardError(`WebSocket error (${backendLabel}).`, event);
+        this.wsErrorNotified = true;
+      }
       this.setStatus('error');
       this.requestUpdate();
     });
   }
 
   private scheduleReconnect(): void {
-    if (!this.isConnected || this.reconnectTimer) {
+    if (!this._config || this.reconnectTimer) {
       return;
     }
 
+    const delay = this.reconnectDelayMs;
     this.reconnectTimer = window.setTimeout(() => {
       this.reconnectTimer = undefined;
       this.connect();
-    }, 1500);
+    }, delay);
+    this.reconnectDelayMs = Math.min(Math.round(this.reconnectDelayMs * 1.8), RECONNECT_MAX_MS);
   }
 
   private teardownSocket(): void {
@@ -258,7 +302,7 @@ export class TouchpadCard extends LitElement {
         this._keyboardOpen = parsed.keyboardOpen;
       }
     } catch (err) {
-      console.warn('Failed to restore touchpad UI state', err);
+      logCardWarn('Failed to restore touchpad UI state.', err);
     }
   }
 
@@ -276,7 +320,7 @@ export class TouchpadCard extends LitElement {
         })
       );
     } catch (err) {
-      console.warn('Failed to persist touchpad UI state', err);
+      logCardWarn('Failed to persist touchpad UI state.', err);
     }
   }
 
@@ -555,7 +599,7 @@ export class TouchpadCard extends LitElement {
       try {
         this.socket.send(JSON.stringify(msg));
       } catch (err) {
-        console.error('Failed to send pointer data', err);
+        logCardError('Failed to send pointer data.', err);
       }
     }
   }
@@ -566,7 +610,7 @@ export class TouchpadCard extends LitElement {
     try {
       this.socket.send(JSON.stringify(msg));
     } catch (err) {
-      console.error('Failed to send tap', err);
+      logCardError('Failed to send tap.', err);
     }
   }
 
@@ -576,7 +620,7 @@ export class TouchpadCard extends LitElement {
     try {
       this.socket.send(JSON.stringify(msg));
     } catch (err) {
-      console.error('Failed to send button state', err);
+      logCardError('Failed to send button state.', err);
     }
   }
 
@@ -587,7 +631,7 @@ export class TouchpadCard extends LitElement {
     try {
       this.socket.send(JSON.stringify(msg));
     } catch (err) {
-      console.error('Failed to send text', err);
+      logCardError('Failed to send text.', err);
     }
   }
 
@@ -597,7 +641,7 @@ export class TouchpadCard extends LitElement {
     try {
       this.socket.send(JSON.stringify(msg));
     } catch (err) {
-      console.error('Failed to send key', err);
+      logCardError('Failed to send key.', err);
     }
   }
 
@@ -607,7 +651,7 @@ export class TouchpadCard extends LitElement {
     try {
       this.socket.send(JSON.stringify(msg));
     } catch (err) {
-      console.error('Failed to send volume action', err);
+      logCardError('Failed to send volume action.', err);
     }
   }
 
@@ -728,15 +772,16 @@ export class TouchpadCard extends LitElement {
   }
 
   private statusLabel(): string {
+    const backendLabel = this.opts.backend === 'webos' ? 'TV' : 'PC';
     switch (this._statusDisplay) {
       case 'connected':
-        return 'Connected';
+        return `${backendLabel} Connected`;
       case 'connecting':
-        return 'Connecting...';
+        return `${backendLabel} Connecting...`;
       case 'error':
-        return 'Connection error';
+        return `${backendLabel} Connection error`;
       default:
-        return 'Disconnected';
+        return `${backendLabel} Disconnected`;
     }
   }
 
@@ -744,6 +789,31 @@ export class TouchpadCard extends LitElement {
     if (!this._config) return nothing;
 
     const showKeyboardSection = this.opts.showKeyboardButton && this._keyboardOpen;
+    const isWebos = this.opts.backend === 'webos';
+    const keyboardPlaceholder = isWebos ? 'Tap to type on TV' : 'Tap to type on PC';
+    const leftButtons = isWebos
+      ? [
+          { label: 'Settings', key: 'settings' as KeyCommand },
+          { label: 'Back', key: 'back' as KeyCommand },
+          { label: 'Home', key: 'home' as KeyCommand },
+          { label: 'OK', key: 'enter' as KeyCommand },
+          { label: 'Power', key: 'power' as KeyCommand },
+        ]
+      : [
+          { label: 'Tab', key: 'tab' as KeyCommand },
+          { label: 'Esc', key: 'escape' as KeyCommand },
+          { label: 'Del', key: 'delete' as KeyCommand },
+          { label: 'Home', key: 'home' as KeyCommand },
+          { label: 'End', key: 'end' as KeyCommand },
+          { label: 'PgUp', key: 'page_up' as KeyCommand },
+          { label: 'PgDown', key: 'page_down' as KeyCommand },
+        ];
+    const arrowButtons = [
+      { label: '↑', key: 'arrow_up' as KeyCommand, class: 'arrow-up', title: 'Arrow up' },
+      { label: '←', key: 'arrow_left' as KeyCommand, class: 'arrow-left', title: 'Arrow left' },
+      { label: '↓', key: 'arrow_down' as KeyCommand, class: 'arrow-down', title: 'Arrow down' },
+      { label: '→', key: 'arrow_right' as KeyCommand, class: 'arrow-right', title: 'Arrow right' },
+    ];
 
     return html`
       <ha-card @contextmenu=${(e: Event) => e.preventDefault()}>
@@ -822,23 +892,25 @@ export class TouchpadCard extends LitElement {
                       autocorrect="off"
                       autocapitalize="none"
                       spellcheck="false"
-                      placeholder="Tap to type on PC"
+                      placeholder="${keyboardPlaceholder}"
                       @input=${this.handleKeyboardInput}
                       @keydown=${this.handleKeyboardKeydown}
                     />
-                    <button class="pill" @click=${() => this.sendKey('tab')}>Tab</button>
-                    <button class="pill" @click=${() => this.sendKey('escape')}>Esc</button>
-                    <button class="pill" @click=${() => this.sendKey('delete')}>Del</button>
-                    <button class="pill" @click=${() => this.sendKey('home')}>Home</button>
-                    <button class="pill" @click=${() => this.sendKey('end')}>End</button>
-                    <button class="pill" @click=${() => this.sendKey('page_up')}>PgUp</button>
-                    <button class="pill" @click=${() => this.sendKey('page_down')}>PgDown</button>
+                    ${leftButtons.map(
+                      (btn) => html`<button class="pill" @click=${() => this.sendKey(btn.key)}>${btn.label}</button>`
+                    )}
                   </div>
                   <div class="right-panel">
-                    <button class="pill arrow arrow-up" @click=${() => this.sendKey('arrow_up')} title="Arrow up">↑</button>
-                    <button class="pill arrow arrow-left" @click=${() => this.sendKey('arrow_left')} title="Arrow left">←</button>
-                    <button class="pill arrow arrow-down" @click=${() => this.sendKey('arrow_down')} title="Arrow down">↓</button>
-                    <button class="pill arrow arrow-right" @click=${() => this.sendKey('arrow_right')} title="Arrow right">→</button>
+                    ${arrowButtons.map(
+                      (btn) =>
+                        html`<button
+                          class="pill arrow ${btn.class}"
+                          @click=${() => this.sendKey(btn.key)}
+                          title=${btn.title}
+                        >
+                          ${btn.label}
+                        </button>`
+                    )}
                   </div>
             </div>`
           : nothing}

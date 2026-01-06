@@ -1,0 +1,31 @@
+{
+  "name": "webOS Pointer Bridge",
+  "version": "0.1.0",
+  "slug": "webos_pointer_bridge",
+  "description": "Bridge touchpad-card events to LG webOS pointer socket.",
+  "url": "https://github.com/michalowskil/lovelace-touchpad-card",
+  "startup": "services",
+  "boot": "auto",
+  "arch": ["aarch64", "amd64", "armhf", "armv7", "i386"],
+  "host_network": true,
+  "init": false,
+  "homeassistant_api": false,
+  "hassio_api": false,
+  "auth_api": false,
+  "map": ["data"],
+  "options": {
+    "tvs": []
+  },
+  "schema": {
+    "tvs": [
+      {
+        "name": "str",
+        "host": "str",
+        "listen_port": "int?",
+        "tv_port": "int?",
+        "use_ssl": "bool?",
+        "origin": "str?"
+      }
+    ]
+  }
+}

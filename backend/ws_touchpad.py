@@ -13,7 +13,7 @@ Messages expected from the Lovelace card (JSON):
   { "t": "down" }
   { "t": "up" }
 
-Run: python ws_touchpad.py --host 0.0.0.0 --port 8765
+Run: python backend/ws_touchpad.py --host 0.0.0.0 --port 8765
 """
 
 import argparse
