@@ -797,7 +797,7 @@ export class TouchpadCard extends LitElement {
           { label: 'Back', key: 'back' as KeyCommand },
           { label: 'Home', key: 'home' as KeyCommand },
           { label: 'OK', key: 'enter' as KeyCommand },
-          { label: 'Power', key: 'power' as KeyCommand },
+          { label: 'Power Off', key: 'power' as KeyCommand },
         ]
       : [
           { label: 'Tab', key: 'tab' as KeyCommand },
@@ -1213,6 +1213,6 @@ if (!window.customCards.find((c) => c.type === 'touchpad-card')) {
   window.customCards.push({
     type: 'touchpad-card',
     name: 'Lovelace Touchpad Card',
-    description: 'Control your PC from Home Assistant with a touchpad, keyboard input, and volume controls.',
+    description: 'Control your PC or LG webOS TV from Home Assistant with a touchpad, keyboard input, and volume controls.',
   });
 }

@@ -1,6 +1,6 @@
 {
   "name": "webOS Pointer Bridge",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "slug": "webos_pointer_bridge",
   "description": "Bridge touchpad-card events to LG webOS pointer socket.",
   "url": "https://github.com/michalowskil/lovelace-touchpad-card",

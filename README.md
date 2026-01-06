@@ -4,9 +4,9 @@
 
 # Lovelace Touchpad Card for Home Assistant
 
-Control your PC from Home Assistant with a touchpad, keyboard input, and volume controls.
+Control your PC or LG webOS TV from Home Assistant with a touchpad, keyboard input, and volume controls.
 
-If you like this card, please consider giving it a ⭐ on GitHub: [![Star on GitHub](https://img.shields.io/github/stars/michalowskil/lovelace-touchpad-card.svg?style=social)](https://github.com/michalowskil/lovelace-touchpad-card/stargazers)
+If you like this project, please consider giving it a ⭐ on GitHub: [![Star on GitHub](https://img.shields.io/github/stars/michalowskil/lovelace-touchpad-card.svg?style=social)](https://github.com/michalowskil/lovelace-touchpad-card/stargazers)
 
 ## Features & gestures
 - One-finger move; tap/double-tap = left/double click; press-and-hold then drag to select/drag.
@@ -63,7 +63,6 @@ Add the card in the UI and configure everything from the visual editor.
        listen_port: 8777
        tv_port: 3001
        use_ssl: true
-       origin: https://webostv.developer.lge.com
      - name: bedroom
        host: 192.168.0.6
        listen_port: 8778
@@ -71,6 +70,7 @@ Add the card in the UI and configure everything from the visual editor.
    ```
    - `listen_port` is where the Lovelace card connects. The add-on runs in host network, so use your HA host IP.
    - Client keys are stored per TV in `/data/keys/<name>.json` and survive restarts.
+   - `origin` is optional; leave it unset/empty unless your TV rejects the default. If needed, set it to `https://www.lge.com`, or to `""` to send no Origin header.
 4. Start the add-on and enable **Start on boot** and **Watchdog** if desired.
 5. In each touchpad card set `wsUrl` to the matching port (for example `ws://homeassistant.local:8777`).
 
@@ -79,6 +79,8 @@ Add the card in the UI and configure everything from the visual editor.
 - For remote/HTTPS, use `wss://` (e.g., reverse proxy). LAN can stay `ws://`.
 
 ## Changelog
+- v0.3.0
+  - Added Home Assistant add-on for the webOS pointer bridge (multi-TV support, host network).
 - v0.2.0
   - Added keyboard and volume controls.
   - Added remembering selected toggles (multiplier, lock, keyboard).
@@ -90,3 +92,4 @@ Add the card in the UI and configure everything from the visual editor.
 
 ![card configuration](screenshots/dark.png)
 ![card configuration](screenshots/light.png)
+![card configuration](screenshots/visibility.png)

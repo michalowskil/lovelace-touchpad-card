@@ -8,10 +8,8 @@ This opens a local WebSocket server that accepts the same messages as the
 touchpad card (move/scroll/click) and forwards them to the TV's pointer socket.
 
 Usage (example):
-    sypialnia:
     python backend/webos_pointer_bridge.py --tv-host 192.168.0.6 --listen-port 8777 --use-ssl --tv-port 3001 --origin --client-key-file backend/webos_client_key_sypialnia.json
 
-    salon:
     python backend/webos_pointer_bridge.py --tv-host 192.168.0.129 --listen-port 8778 --use-ssl --tv-port 3001 --origin --client-key-file backend/webos_client_key_salon.json
 
 On first run the TV will prompt for pairing. The returned client-key is cached
