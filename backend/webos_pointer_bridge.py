@@ -257,8 +257,9 @@ class WebOSPointerBridge:
             ssl_ctx = ssl._create_unverified_context() if use_ssl else None
             logging.info("Connecting to webOS at %s", uri)
             kwargs = {"ssl": ssl_ctx}
-            if self.origin:
-                kwargs["origin"] = self.origin
+            origin_header = self._origin_header(send_default=False)
+            if origin_header:
+                kwargs["origin"] = origin_header
             return await websockets.connect(uri, **kwargs)
 
         session_use_ssl = self.use_ssl
@@ -281,8 +282,11 @@ class WebOSPointerBridge:
             raise ConnectionError("No pointer socket path returned by TV")
 
         ptr_ssl = ssl._create_unverified_context() if socket_path.startswith("wss://") else None
-        origin = self.origin or "https://www.lge.com"
-        self.pointer_ws = await websockets.connect(socket_path, ssl=ptr_ssl, origin=origin)
+        origin_header = self._origin_header()
+        if origin_header:
+            self.pointer_ws = await websockets.connect(socket_path, ssl=ptr_ssl, origin=origin_header)
+        else:
+            self.pointer_ws = await websockets.connect(socket_path, ssl=ptr_ssl)
         logging.info("Pointer socket established: %s", socket_path)
 
     async def _connect_ime(self) -> None:
@@ -298,8 +302,11 @@ class WebOSPointerBridge:
                 logging.info("IME socket not provided by TV.")
                 return
             ssl_ctx = ssl._create_unverified_context() if socket_path.startswith("wss://") else None
-            origin = self.origin or "https://www.lge.com"
-            self.ime_ws = await websockets.connect(socket_path, ssl=ssl_ctx, origin=origin)
+            origin_header = self._origin_header()
+            if origin_header:
+                self.ime_ws = await websockets.connect(socket_path, ssl=ssl_ctx, origin=origin_header)
+            else:
+                self.ime_ws = await websockets.connect(socket_path, ssl=ssl_ctx)
             logging.info("IME socket established: %s", socket_path)
         except Exception:
             if not self._ime_failed:
@@ -392,6 +399,13 @@ class WebOSPointerBridge:
             return str(state).lower().endswith("closed")
         return bool(getattr(conn, "closed", False) or getattr(conn, "closing_exc", None))
 
+    def _origin_header(self, send_default: bool = True) -> str | None:
+        if self.origin == "":
+            return None
+        if self.origin:
+            return self.origin
+        return "https://www.lge.com" if send_default else None
+
     def _load_client_key(self) -> None:
         if self.client_key_file.exists():
             try:
@@ -418,7 +432,7 @@ async def main() -> None:
         "--origin",
         nargs="?",
         const="",
-        default="https://webostv.developer.lge.com",
+        default=None,
         help="Origin header to send; provide empty/omit value to skip sending (some TVs reject unknown origins)",
     )
     parser.add_argument("--listen-host", default="0.0.0.0", help="Host/IP to bind for card websocket")

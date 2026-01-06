@@ -15,7 +15,7 @@ from webos_pointer_bridge import WebOSPointerBridge
 
 DEFAULT_TV_PORT = 3001
 DEFAULT_USE_SSL = True
-DEFAULT_ORIGIN = "https://webostv.developer.lge.com"
+DEFAULT_ORIGIN = None
 DEFAULT_LISTEN_BASE = 8777
 OPTIONS_PATH = Path("/data/options.json")
 KEYS_DIR = Path("/data/keys")
