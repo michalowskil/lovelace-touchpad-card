@@ -81,6 +81,9 @@ Add the card in the UI and configure everything from the visual editor.
 - For remote/HTTPS, use `wss://` (e.g., reverse proxy). LAN can stay `ws://`.
 
 ## Changelog
+- v0.3.1
+  - webOS: smoother cursor movement at high sensitivity and much gentler scrolling when multiplier is 1.
+  - Card editor: numeric fields (sensitivity, scroll, double-tap window, tap suppression) are easy to edit; labels show defaults so leaving a field blank falls back to a sensible value.
 - v0.3.0
   - Added Home Assistant add-on for the webOS pointer bridge (multi-TV support, host network).
 - v0.2.0

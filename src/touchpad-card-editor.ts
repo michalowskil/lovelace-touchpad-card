@@ -10,11 +10,7 @@ const DEFAULT_FORM_VALUES: Partial<TouchpadCardConfig> = {
   show_status_text: true,
   show_audio_controls: true,
   show_keyboard_button: true,
-  sensitivity: 1,
-  scroll_multiplier: 1,
   invert_scroll: false,
-  double_tap_ms: 250,
-  tap_suppression_px: 6,
 };
 
 const schema: HaFormSchema[] = [
@@ -63,12 +59,12 @@ const schema: HaFormSchema[] = [
   {
     name: 'sensitivity',
     type: 'float',
-    default: 1,
+    required: false,
   },
   {
     name: 'scroll_multiplier',
     type: 'float',
-    default: 1,
+    required: false,
   },
   {
     name: 'invert_scroll',
@@ -78,12 +74,12 @@ const schema: HaFormSchema[] = [
   {
     name: 'double_tap_ms',
     type: 'integer',
-    default: 250,
+    required: false,
   },
   {
     name: 'tap_suppression_px',
     type: 'integer',
-    default: 6,
+    required: false,
   },
 ];
 
@@ -102,7 +98,19 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
     const detail = (ev.detail as { value?: Partial<TouchpadCardConfig> })?.value;
     if (!detail) return;
 
-    this._config = { ...this._config, ...detail };
+    const numericFields = new Set<keyof TouchpadCardConfig>(['sensitivity', 'scroll_multiplier', 'double_tap_ms', 'tap_suppression_px']);
+    const cleaned: Partial<TouchpadCardConfig> = {};
+    Object.entries(detail).forEach(([key, value]) => {
+      if (numericFields.has(key as keyof TouchpadCardConfig)) {
+        if (value === '' || value === null || Number.isNaN(value as number)) {
+          cleaned[key as keyof TouchpadCardConfig] = undefined;
+          return;
+        }
+      }
+      cleaned[key as keyof TouchpadCardConfig] = value as TouchpadCardConfig[keyof TouchpadCardConfig];
+    });
+
+    this._config = { ...this._config, ...cleaned };
     fireEvent(this, 'config-changed', { config: this._config });
   }
 
@@ -123,15 +131,15 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
       case 'show_keyboard_button':
         return 'Show keyboard toggle';
       case 'sensitivity':
-        return 'Swipe sensitivity';
+        return 'Swipe sensitivity (default 1)';
       case 'scroll_multiplier':
-        return 'Scroll multiplier';
+        return 'Scroll multiplier (default 1)';
       case 'invert_scroll':
         return 'Reverse scroll direction';
       case 'double_tap_ms':
-        return 'Double tap window (ms)';
+        return 'Double tap window (ms, default 250)';
       case 'tap_suppression_px':
-        return 'Max move allowed for tap (px)';
+        return 'Max move allowed for tap (px, default 6)';
       default:
         return String(field.name);
     }

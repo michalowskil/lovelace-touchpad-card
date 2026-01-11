@@ -20,6 +20,7 @@ import argparse
 import asyncio
 import json
 import logging
+import math
 import ssl
 from pathlib import Path
 from typing import Optional
@@ -31,6 +32,10 @@ from websockets.server import ServerConnection
 
 POINTER_URI = "ssap://com.webos.service.networkinput/getPointerInputSocket"
 IME_URI = "ssap://com.webos.service.ime/registerRemoteKeyboard"
+# webOS pointer socket becomes non-linear with large deltas; keep packets small.
+MAX_POINTER_DELTA = 40
+MAX_POINTER_CHUNKS = 64
+SCROLL_SCALE = 0.005
 
 
 class WebOSPointerBridge:
@@ -58,6 +63,8 @@ class WebOSPointerBridge:
         self.ime_ws: Optional[ClientConnection] = None
         self._ime_failed = False
         self._connect_lock = asyncio.Lock()
+        self._scroll_rem_x = 0.0
+        self._scroll_rem_y = 0.0
 
     async def start(self) -> None:
         self._load_client_key()
@@ -118,13 +125,49 @@ class WebOSPointerBridge:
             logging.exception("Failed to send pointer payload")
             await self._teardown_pointer()
 
+    def _chunk_pointer_delta(self, dx: float, dy: float) -> list[tuple[int, int]]:
+        target_dx = int(round(dx))
+        target_dy = int(round(dy))
+        max_axis = max(abs(target_dx), abs(target_dy))
+        steps = max(1, min(MAX_POINTER_CHUNKS, int(math.ceil(max_axis / MAX_POINTER_DELTA)))) if max_axis else 1
+        if steps == 1:
+            return [(target_dx, target_dy)]
+
+        # Spread the total delta across a few smaller packets to keep webOS in its linear range.
+        chunks: list[tuple[int, int]] = []
+        prev_x = prev_y = 0
+        for i in range(1, steps + 1):
+            next_x = int(round(target_dx * i / steps))
+            next_y = int(round(target_dy * i / steps))
+            chunk_x = next_x - prev_x
+            chunk_y = next_y - prev_y
+            if chunk_x != 0 or chunk_y != 0:
+                chunks.append((chunk_x, chunk_y))
+            prev_x, prev_y = next_x, next_y
+        return chunks or [(0, 0)]
+
     async def _send_move(self, dx: float, dy: float) -> None:
-        cmd = f"type:move\ndx:{int(round(dx))}\ndy:{int(round(dy))}\n\n"
-        await self._send_pointer(cmd)
+        for chunk_dx, chunk_dy in self._chunk_pointer_delta(dx, dy):
+            cmd = f"type:move\ndx:{chunk_dx}\ndy:{chunk_dy}\n\n"
+            await self._send_pointer(cmd)
 
     async def _send_scroll(self, dx: float, dy: float) -> None:
-        cmd = f"type:scroll\ndx:{int(round(dx))}\ndy:{int(round(dy))}\n\n"
-        await self._send_pointer(cmd)
+        # webOS scroll is very sensitive; downscale and accumulate to keep motion smooth.
+        self._scroll_rem_x += dx * SCROLL_SCALE
+        self._scroll_rem_y += dy * SCROLL_SCALE
+
+        scaled_dx = int(round(self._scroll_rem_x))
+        scaled_dy = int(round(self._scroll_rem_y))
+
+        self._scroll_rem_x -= scaled_dx
+        self._scroll_rem_y -= scaled_dy
+
+        if scaled_dx == 0 and scaled_dy == 0:
+            return
+
+        for chunk_dx, chunk_dy in self._chunk_pointer_delta(scaled_dx, scaled_dy):
+            cmd = f"type:scroll\ndx:{chunk_dx}\ndy:{chunk_dy}\n\n"
+            await self._send_pointer(cmd)
 
     async def _send_click(self) -> None:
         await self._send_pointer("type:click\n\n")
