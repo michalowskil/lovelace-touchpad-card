@@ -4,6 +4,7 @@
   "slug": "webos_pointer_bridge",
   "description": "Bridge touchpad-card events to LG webOS pointer socket.",
   "url": "https://github.com/michalowskil/lovelace-touchpad-card",
+  "changelog": "https://raw.githubusercontent.com/michalowskil/lovelace-touchpad-card/main/addon/webos-pointer-bridge/CHANGELOG.md",
   "startup": "services",
   "boot": "auto",
   "arch": ["aarch64", "amd64", "armhf", "armv7", "i386"],
