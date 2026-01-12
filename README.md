@@ -45,10 +45,12 @@ Add the card in the UI and configure everything from the visual editor.
    ```powershell
    touchpad-server.exe --host 0.0.0.0 --port 8765
    ```
+   - Starts directly in the system tray. Double-click the tray icon (or use the first menu item) to show/hide the log window. Closing/minimizing that window only hides it; the server keeps running.
    - SmartScreen may show ```Windows protected your PC``` because the file is unsigned. Click **More info** → **Run anyway**, or build from source yourself if you prefer.
-   - Host and port are optional, if you omit them, the defaults are `0.0.0.0` and `8765` as shown.
-3. Keep the window open while using the card. Allow it through Windows Firewall on first run.
-4. Optional: add a shortcut to Startup or create a scheduled task for auto-start.
+   - Host and port are optional; defaults are `0.0.0.0` and `8765`.
+3. Allow it through Windows Firewall on first run so the card can connect.
+4. To auto-start, place a shortcut to `touchpad-server.exe` in Startup or create a scheduled task.
+5. Logs are written to `touchpad-server.log` next to the executable. Use the tray icon to view them live.
 
 ## webOS backend (Home Assistant add-on)
 
@@ -81,20 +83,13 @@ Add the card in the UI and configure everything from the visual editor.
 - For remote/HTTPS, use `wss://` (e.g., reverse proxy). LAN can stay `ws://`.
 
 ## Changelog
-- v0.3.1
-  - webOS: smoother cursor movement at high sensitivity and much gentler scrolling when multiplier is 1.
-  - Card editor: numeric fields (sensitivity, scroll, double-tap window, tap suppression) are easy to edit; labels show defaults so leaving a field blank falls back to a sensible value.
-- v0.3.0
-  - Added Home Assistant add-on for the webOS pointer bridge (multi-TV support, host network).
-- v0.2.0
-  - Added keyboard and volume controls.
-  - Added remembering selected toggles (multiplier, lock, keyboard).
-  - Switched server to the current `websockets.server` API to drop deprecation warnings.
-- v0.1.4
-  - First release.
+- **Card (frontend):** latest v0.3.1 — see [CHANGELOG.md](CHANGELOG.md). Highlights: editor numeric fields easier to edit; defaults shown so blanks fall back sensibly.
+- **Windows backend:** latest v0.4.0 — see [backend/CHANGELOG.md](backend/CHANGELOG.md). Highlights: Windows backend now ships as a tray-first `touchpad-server.exe` (no console); tray icon toggles the log window.
+- **webOS add-on:** latest v0.3.1 — see [addon/webos-pointer-bridge/CHANGELOG.md](addon/webos-pointer-bridge/CHANGELOG.md). Highlights: smoother pointer at high sensitivity; gentler scrolling when multiplier is 1.
 
 ## Screenshots
 
 ![card configuration](screenshots/dark.png)
 ![card configuration](screenshots/light.png)
 ![card configuration](screenshots/visibility.png)
+![tray and log](screenshots/tray-and-log.png)

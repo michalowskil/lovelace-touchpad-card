@@ -20,7 +20,8 @@ import argparse
 import asyncio
 import json
 import logging
-from typing import Any, Dict
+import threading
+from typing import Any, Dict, Optional
 
 import websockets
 from websockets.exceptions import ConnectionClosedError, ConnectionClosedOK
@@ -253,7 +254,12 @@ async def handle_client(ws: ServerConnection, injector: InputInjector) -> None:
         )
 
 
-async def main(host: str, port: int, scroll_scale: float) -> None:
+async def serve(
+    host: str,
+    port: int,
+    scroll_scale: float,
+    stop_event: Optional[threading.Event] = None,
+) -> None:
     injector = InputInjector(scroll_scale)
     async with websockets.serve(
         lambda ws: handle_client(ws, injector),
@@ -264,7 +270,11 @@ async def main(host: str, port: int, scroll_scale: float) -> None:
         ping_timeout=15,
     ):
         logging.info("Touchpad WebSocket listening on %s:%s", host, port)
-        await asyncio.Future()
+        if stop_event is None:
+            await asyncio.Future()
+        else:
+            while not stop_event.is_set():
+                await asyncio.sleep(0.5)
 
 
 if __name__ == "__main__":
@@ -274,4 +284,4 @@ if __name__ == "__main__":
     parser.add_argument("--scroll-scale", type=float, default=4.0, help="Pixels per wheel unit multiplier")
     args = parser.parse_args()
 
-    asyncio.run(main(args.host, args.port, args.scroll_scale))
+    asyncio.run(serve(args.host, args.port, args.scroll_scale))

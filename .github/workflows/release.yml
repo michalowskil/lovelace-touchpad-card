@@ -91,7 +91,7 @@ jobs:
           python -m pip install pyinstaller -r backend/requirements.txt
 
       - name: Build Windows backend (PyInstaller)
-        run: pyinstaller --onefile --name touchpad-server --distpath dist backend/ws_touchpad.py
+        run: pyinstaller --onefile --noconsole --name touchpad-server --distpath dist backend/touchpad_tray.py
 
       - name: Upload backend asset to existing release
         if: github.event_name == 'release'

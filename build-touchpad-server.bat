@@ -13,16 +13,17 @@ set "PYTHON=python"
 echo Using system Python: %PYTHON%
 
 :build
-echo Building backend\dist\touchpad-server.exe ...
+echo Building backend\dist\touchpad-server.exe (tray, default) ...
 %PYTHON% -m PyInstaller ^
   --onefile ^
+  --noconsole ^
   --name touchpad-server ^
   --distpath "%ROOT%backend\dist" ^
   --workpath "%ROOT%backend\build" ^
   --specpath "%ROOT%backend\build" ^
-  "%ROOT%backend\ws_touchpad.py" || goto :error
+  "%ROOT%backend\touchpad_tray.py" || goto :error
 
-echo Done: backend\dist\touchpad-server.exe
+echo Done: backend\dist\touchpad-server.exe (tray)
 exit /b 0
 
 :error
