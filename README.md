@@ -1,6 +1,7 @@
 [![Forum](https://img.shields.io/badge/dynamic/json?style=flat&label=Forum&color=41BDF5&logo=homeassistant&logoColor=white&suffix=%20posts&url=https://community.home-assistant.io/t/lovelace-touchpad-card-for-home-assistant-windows-os-touchpad/966857.json&query=$.posts_count)](https://community.home-assistant.io/t/lovelace-touchpad-card-for-home-assistant-windows-os-touchpad/966857)
 [![GitHub Discussions](https://img.shields.io/github/discussions/michalowskil/lovelace-touchpad-card?logo=github&logoColor=white&label=Discussions)](https://github.com/michalowskil/lovelace-touchpad-card/discussions)
-[![Downloads](https://img.shields.io/github/downloads/michalowskil/lovelace-touchpad-card/total?label=Downloads&logo=github)](https://github.com/michalowskil/lovelace-touchpad-card/releases)
+[![touchpad-card.js downloads](https://img.shields.io/github/downloads/michalowskil/lovelace-touchpad-card/touchpad-card.js?label=Downloads&logo=github)](https://github.com/michalowskil/lovelace-touchpad-card/releases)
+[![Latest downloads](https://img.shields.io/github/downloads/michalowskil/lovelace-touchpad-card/latest/touchpad-card.js?label=Latest%20downloads&logo=github)](https://github.com/michalowskil/lovelace-touchpad-card/releases/latest)
 
 # Lovelace Touchpad Card for Home Assistant
 
@@ -85,7 +86,7 @@ Add the card in the UI and configure everything from the visual editor.
 ## Changelog
 - **Card (frontend):** latest v0.3.1 — see [CHANGELOG.md](CHANGELOG.md). Highlights: editor numeric fields easier to edit; defaults shown so blanks fall back sensibly.
 - **Windows backend:** latest v0.4.0 — see [backend/CHANGELOG.md](backend/CHANGELOG.md). Highlights: Windows backend now ships as a tray-first `touchpad-server.exe` (no console); tray icon toggles the log window.
-- **webOS add-on:** latest v0.3.1 — see [addon/webos-pointer-bridge/CHANGELOG.md](addon/webos-pointer-bridge/CHANGELOG.md). Highlights: smoother pointer at high sensitivity; gentler scrolling when multiplier is 1.
+- **webOS add-on:** latest v0.3.2 — see [addon/webos-pointer-bridge/CHANGELOG.md](addon/webos-pointer-bridge/CHANGELOG.md). Highlights: aarch64 add-on builds now use the multi-arch Home Assistant base image.
 
 ## Screenshots
 

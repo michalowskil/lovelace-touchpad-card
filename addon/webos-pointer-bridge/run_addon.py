@@ -19,6 +19,7 @@ DEFAULT_ORIGIN = None
 DEFAULT_LISTEN_BASE = 8777
 OPTIONS_PATH = Path("/data/options.json")
 KEYS_DIR = Path("/data/keys")
+RETRY_DELAY_SECONDS = 5
 
 
 def load_options() -> List[Dict[str, Any]]:
@@ -84,13 +85,24 @@ async def run_bridge(tv_cfg: Dict[str, Any]) -> None:
             await bridge.start()
         except asyncio.CancelledError:
             raise
+        except (TimeoutError, OSError) as err:
+            logging.warning(
+                "Bridge for %s could not connect (%s: %s); retrying in %ss",
+                name,
+                type(err).__name__,
+                err,
+                RETRY_DELAY_SECONDS,
+            )
+            await asyncio.sleep(RETRY_DELAY_SECONDS)
         except Exception:
-            logging.exception("Bridge for %s crashed; retrying in 5s", name)
-            await asyncio.sleep(5)
+            logging.exception("Bridge for %s crashed; retrying in %ss", name, RETRY_DELAY_SECONDS)
+            await asyncio.sleep(RETRY_DELAY_SECONDS)
 
 
 async def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+    logging.getLogger("websockets.server").setLevel(logging.WARNING)
+    logging.getLogger("websockets.client").setLevel(logging.WARNING)
 
     try:
         tvs_raw = load_options()

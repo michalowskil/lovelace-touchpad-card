@@ -1,5 +1,4 @@
-ARG BUILD_FROM=ghcr.io/home-assistant/amd64-base:latest
-FROM ${BUILD_FROM}
+FROM ghcr.io/home-assistant/base:latest
 
 SHELL ["/bin/ash", "-o", "pipefail", "-c"]
 WORKDIR /opt/webos-bridge
