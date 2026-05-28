@@ -3,7 +3,7 @@
 [![touchpad-card.js downloads](https://img.shields.io/github/downloads/michalowskil/lovelace-touchpad-card/touchpad-card.js?label=Downloads&logo=github)](https://github.com/michalowskil/lovelace-touchpad-card/releases)
 [![Latest downloads](https://img.shields.io/github/downloads/michalowskil/lovelace-touchpad-card/latest/touchpad-card.js?label=Latest%20downloads&logo=github)](https://github.com/michalowskil/lovelace-touchpad-card/releases/latest)
 
-# Lovelace Touchpad Card for Home Assistant
+# Lovelace Touchpad Card
 
 Control your PC or LG webOS TV from Home Assistant with a touchpad, keyboard input, and volume controls.
 
