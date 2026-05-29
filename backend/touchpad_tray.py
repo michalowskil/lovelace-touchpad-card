@@ -8,14 +8,17 @@ the server. Intended for autostart so no console window has to stay open.
 
 import argparse
 import asyncio
+import json
 import logging
 import queue
 import sys
 import threading
 import tkinter as tk
+import urllib.request
+import webbrowser
 from pathlib import Path
 from tkinter import scrolledtext
-from typing import Optional
+from typing import Any, Optional
 
 import pystray
 from PIL import Image, ImageDraw, ImageTk
@@ -25,6 +28,12 @@ from ws_touchpad import serve
 
 LOG_FORMAT = "%(asctime)s [%(levelname)s] %(message)s"
 QUEUE_LIMIT = 1000
+APP_VERSION = "0.4.1"
+LATEST_RELEASE_API_URL = "https://api.github.com/repos/michalowskil/lovelace-touchpad-card/releases/latest"
+LATEST_RELEASE_URL = "https://github.com/michalowskil/lovelace-touchpad-card/releases/latest"
+UPDATE_CHECK_INITIAL_DELAY_MS = 10_000
+UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000
+UPDATE_CHECK_TIMEOUT_SECONDS = 10
 
 
 def hide_console_window() -> None:
@@ -203,14 +212,20 @@ class TrayApp:
         self.log_window = LogWindow(self.root, self.log_queue, self.log_file, icon_photo=self.tk_icon)
         self.icon: Optional[pystray.Icon] = None
         self.server_thread = ServerThread(self.host, self.port, self.scroll_scale, self.stop_event)
+        self.update_check_running = False
+        self.update_timer: Optional[str] = None
+        self.notified_release: Optional[str] = None
+        self.latest_release_url = LATEST_RELEASE_URL
 
         self._attach_log_handlers()
 
     def run(self) -> None:
         hide_console_window()
+        logging.info("Touchpad server version %s", APP_VERSION)
         self.server_thread.start()
         self.icon = self._build_icon()
         self.icon.run_detached()
+        self._schedule_update_check(UPDATE_CHECK_INITIAL_DELAY_MS)
         self.root.mainloop()
         self._shutdown()
 
@@ -234,12 +249,14 @@ class TrayApp:
     def _build_icon(self) -> pystray.Icon:
         menu = pystray.Menu(
             Item(lambda _: "Hide log window" if self.log_window.is_visible() else "Show log window", self._toggle_logs, default=True),
+            Item("Check for updates", self._check_updates_now),
+            Item("Open latest release", self._open_latest_release),
             Item("Quit", self._quit),
         )
         return DaemonIcon(
             "touchpad-server",
             self.tray_image,
-            title=f"Touchpad server ({self.host}:{self.port})",
+            title=f"Touchpad server v{APP_VERSION} ({self.host}:{self.port})",
             menu=menu,
         )
 
@@ -264,8 +281,112 @@ class TrayApp:
     def _quit(self, icon: pystray.Icon, _: Item) -> None:
         self.root.after(0, self._stop)
 
+    def _check_updates_now(self, icon: pystray.Icon, _: Item) -> None:
+        self.root.after(0, lambda: self._start_update_check(notify_when_current=True, reschedule=False))
+
+    def _open_latest_release(self, icon: pystray.Icon, _: Item) -> None:
+        self.root.after(0, lambda: webbrowser.open(self.latest_release_url or LATEST_RELEASE_URL))
+
+    def _schedule_update_check(self, delay_ms: int = UPDATE_CHECK_INTERVAL_MS) -> None:
+        if self.stop_event.is_set():
+            return
+        if self.update_timer is not None:
+            self.root.after_cancel(self.update_timer)
+        self.update_timer = self.root.after(delay_ms, self._run_scheduled_update_check)
+
+    def _run_scheduled_update_check(self) -> None:
+        self.update_timer = None
+        self._start_update_check(notify_when_current=False, reschedule=True)
+
+    def _start_update_check(self, notify_when_current: bool, reschedule: bool) -> None:
+        if self.update_check_running:
+            if notify_when_current:
+                self._notify("Touchpad server", "An update check is already running.")
+            return
+        self.update_check_running = True
+        threading.Thread(
+            target=self._run_update_check,
+            args=(notify_when_current, reschedule),
+            daemon=True,
+        ).start()
+
+    def _run_update_check(self, notify_when_current: bool, reschedule: bool) -> None:
+        latest: Optional[dict[str, Any]] = None
+        error: Optional[BaseException] = None
+        try:
+            latest = self._fetch_latest_release()
+        except Exception as err:
+            error = err
+        self.root.after(0, lambda: self._finish_update_check(latest, error, notify_when_current, reschedule))
+
+    def _fetch_latest_release(self) -> dict[str, Any]:
+        request = urllib.request.Request(
+            LATEST_RELEASE_API_URL,
+            headers={
+                "Accept": "application/vnd.github+json",
+                "User-Agent": f"touchpad-server/{APP_VERSION}",
+            },
+        )
+        with urllib.request.urlopen(request, timeout=UPDATE_CHECK_TIMEOUT_SECONDS) as response:
+            return json.loads(response.read().decode("utf-8"))
+
+    def _finish_update_check(
+        self,
+        latest: Optional[dict[str, Any]],
+        error: Optional[BaseException],
+        notify_when_current: bool,
+        reschedule: bool,
+    ) -> None:
+        self.update_check_running = False
+
+        if reschedule and not self.stop_event.is_set():
+            self._schedule_update_check()
+
+        if error is not None:
+            logging.info("Update check failed: %s", error)
+            if notify_when_current:
+                self._notify("Touchpad server", "Could not check for updates. See the log for details.")
+            return
+
+        if latest is None:
+            return
+
+        latest_tag = str(latest.get("tag_name") or "")
+        if not latest_tag:
+            logging.info("Update check returned no release tag.")
+            return
+
+        latest_url = str(latest.get("html_url") or LATEST_RELEASE_URL)
+        self.latest_release_url = latest_url
+
+        if _is_newer_version(latest_tag, APP_VERSION):
+            logging.info("New touchpad release available: %s", latest_tag)
+            if notify_when_current or self.notified_release != latest_tag:
+                self.notified_release = latest_tag
+                self._notify(
+                    "Touchpad server update available",
+                    f"{latest_tag} is available. Open the tray menu and download the new touchpad-server.exe from the latest release.",
+                )
+            return
+
+        logging.info("No newer touchpad release found (current %s, latest %s).", APP_VERSION, latest_tag)
+        if notify_when_current:
+            self._notify("Touchpad server", f"No newer version found. You are running {APP_VERSION}.")
+
+    def _notify(self, title: str, message: str) -> None:
+        if self.icon is not None and getattr(self.icon, "HAS_NOTIFICATION", False):
+            try:
+                self.icon.notify(message, title)
+                return
+            except Exception:
+                logging.exception("Could not show tray notification")
+        logging.info("%s: %s", title, message)
+
     def _stop(self) -> None:
         self.stop_event.set()
+        if self.update_timer is not None:
+            self.root.after_cancel(self.update_timer)
+            self.update_timer = None
         self.log_window.destroy()
         if self.icon is not None:
             self.icon.visible = False
@@ -285,6 +406,27 @@ class TrayApp:
         self.log_window.destroy()
         self.root.destroy()
         sys.exit(0)
+
+
+def _parse_version(value: str) -> tuple[int, ...]:
+    base = value.strip().lower()
+    if base.startswith("v"):
+        base = base[1:]
+    base = base.split("-", 1)[0]
+    parts: list[int] = []
+    for part in base.split("."):
+        if not part.isdigit():
+            return ()
+        parts.append(int(part))
+    while len(parts) < 3:
+        parts.append(0)
+    return tuple(parts)
+
+
+def _is_newer_version(latest: str, current: str) -> bool:
+    latest_parts = _parse_version(latest)
+    current_parts = _parse_version(current)
+    return bool(latest_parts and current_parts and latest_parts > current_parts)
 
 
 def parse_args() -> argparse.Namespace:
