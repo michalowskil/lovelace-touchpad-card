@@ -21,6 +21,7 @@ import asyncio
 import json
 import logging
 import threading
+from contextlib import suppress
 from typing import Any, Dict, Optional
 
 import websockets
@@ -34,6 +35,8 @@ except ImportError as err:  # pragma: no cover - platform guard
     raise SystemExit("This script must run on Windows (ctypes and wintypes required)") from err
 
 ULONG_PTR = getattr(wintypes, "ULONG_PTR", ctypes.c_size_t)
+user32 = ctypes.WinDLL("user32", use_last_error=True)
+kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -56,6 +59,11 @@ MOUSEEVENTF_HWHEEL = 0x01000
 WHEEL_DELTA = 120
 KEYEVENTF_KEYUP = 0x0002
 KEYEVENTF_UNICODE = 0x0004
+UOI_NAME = 2
+DESKTOP_READOBJECTS = 0x0001
+DESKTOP_JOURNALPLAYBACK = 0x0020
+DESKTOP_WRITEOBJECTS = 0x0080
+DESKTOP_INPUT_ACCESS = DESKTOP_READOBJECTS | DESKTOP_JOURNALPLAYBACK | DESKTOP_WRITEOBJECTS
 VK_VOLUME_MUTE = 0x00AD
 VK_VOLUME_DOWN = 0x00AE
 VK_VOLUME_UP = 0x00AF
@@ -106,23 +114,135 @@ class INPUT(ctypes.Structure):
     _fields_ = [("type", wintypes.DWORD), ("union", _INPUTUNION)]
 
 
-SendInput = ctypes.windll.user32.SendInput
+SendInput = user32.SendInput
+SendInput.argtypes = [wintypes.UINT, ctypes.POINTER(INPUT), ctypes.c_int]
+SendInput.restype = wintypes.UINT
+
+OpenInputDesktop = user32.OpenInputDesktop
+OpenInputDesktop.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+OpenInputDesktop.restype = wintypes.HANDLE
+
+SetThreadDesktop = user32.SetThreadDesktop
+SetThreadDesktop.argtypes = [wintypes.HANDLE]
+SetThreadDesktop.restype = wintypes.BOOL
+
+GetThreadDesktop = user32.GetThreadDesktop
+GetThreadDesktop.argtypes = [wintypes.DWORD]
+GetThreadDesktop.restype = wintypes.HANDLE
+
+CloseDesktop = user32.CloseDesktop
+CloseDesktop.argtypes = [wintypes.HANDLE]
+CloseDesktop.restype = wintypes.BOOL
+
+GetUserObjectInformationW = user32.GetUserObjectInformationW
+GetUserObjectInformationW.argtypes = [
+    wintypes.HANDLE,
+    ctypes.c_int,
+    ctypes.c_void_p,
+    wintypes.DWORD,
+    ctypes.POINTER(wintypes.DWORD),
+]
+GetUserObjectInformationW.restype = wintypes.BOOL
+
+GetCurrentThreadId = kernel32.GetCurrentThreadId
+GetCurrentThreadId.argtypes = []
+GetCurrentThreadId.restype = wintypes.DWORD
+
+_desktop_state = threading.local()
+
+
+def _last_error() -> int:
+    return ctypes.get_last_error()
+
+
+def _desktop_name(handle: int) -> str:
+    if not handle:
+        return "<none>"
+
+    needed = wintypes.DWORD(0)
+    GetUserObjectInformationW(handle, UOI_NAME, None, 0, ctypes.byref(needed))
+    if needed.value <= 0:
+        return f"<unknown:{_last_error()}>"
+
+    char_count = max(1, needed.value // ctypes.sizeof(ctypes.c_wchar))
+    buffer = ctypes.create_unicode_buffer(char_count)
+    buffer_ptr = ctypes.cast(buffer, ctypes.c_void_p)
+    if not GetUserObjectInformationW(handle, UOI_NAME, buffer_ptr, needed.value, ctypes.byref(needed)):
+        return f"<unknown:{_last_error()}>"
+    return buffer.value
+
+
+def _close_desktop(handle: int) -> None:
+    if handle:
+        with suppress(Exception):
+            CloseDesktop(handle)
+
+
+def _log_desktop_once(level: int, key: tuple[Any, ...], message: str, *args: Any) -> None:
+    if getattr(_desktop_state, "last_log_key", None) == key:
+        return
+    _desktop_state.last_log_key = key
+    logging.log(level, message, *args)
+
+
+def _sync_to_input_desktop() -> bool:
+    input_desktop = OpenInputDesktop(0, False, DESKTOP_INPUT_ACCESS)
+    if not input_desktop:
+        err = _last_error()
+        _log_desktop_once(
+            logging.WARNING,
+            ("open-input-desktop", err),
+            "OpenInputDesktop failed (%s); input may not reach the active desktop.",
+            err,
+        )
+        return False
+
+    input_name = _desktop_name(input_desktop)
+    current_desktop = GetThreadDesktop(GetCurrentThreadId())
+    current_name = _desktop_name(current_desktop)
+
+    if current_name == input_name:
+        _close_desktop(input_desktop)
+        return True
+
+    previous_owned = getattr(_desktop_state, "owned_desktop", None)
+    if SetThreadDesktop(input_desktop):
+        _desktop_state.owned_desktop = input_desktop
+        _desktop_state.last_log_key = None
+        logging.info("Input desktop changed: %s -> %s", current_name, input_name)
+        if previous_owned:
+            _close_desktop(previous_owned)
+        return True
+
+    err = _last_error()
+    _close_desktop(input_desktop)
+    _log_desktop_once(
+        logging.WARNING,
+        ("set-thread-desktop", current_name, input_name, err),
+        "SetThreadDesktop failed (%s -> %s, error %s); input may not reach the active desktop.",
+        current_name,
+        input_name,
+        err,
+    )
+    return False
 
 
 def _send_mouse_input(flags: int, dx: int = 0, dy: int = 0, data: int = 0) -> None:
+    _sync_to_input_desktop()
     mi = MOUSEINPUT(dx, dy, data, flags, 0, 0)
     inp = INPUT(INPUT_MOUSE, _INPUTUNION(mi))
     result = SendInput(1, ctypes.byref(inp), ctypes.sizeof(inp))
     if result != 1:
-        logging.warning("SendInput failed (%s)", ctypes.GetLastError())
+        logging.warning("SendInput failed (%s)", _last_error())
 
 
 def _send_keyboard_input(vk: int, flags: int = 0, scan: int = 0) -> None:
+    _sync_to_input_desktop()
     ki = KEYBDINPUT(vk, scan, flags, 0, 0)
     inp = INPUT(INPUT_KEYBOARD, _INPUTUNION(ki=ki))
     result = SendInput(1, ctypes.byref(inp), ctypes.sizeof(inp))
     if result != 1:
-        logging.warning("SendInput (keyboard) failed (%s)", ctypes.GetLastError())
+        logging.warning("SendInput (keyboard) failed (%s)", _last_error())
 
 
 class InputInjector:

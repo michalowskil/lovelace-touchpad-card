@@ -85,7 +85,7 @@ Add the card in the UI and configure everything from the visual editor.
 
 ## Changelog
 - **Card (frontend):** latest v0.3.1 — see [CHANGELOG.md](CHANGELOG.md). Highlights: editor numeric fields easier to edit; defaults shown so blanks fall back sensibly.
-- **Windows backend:** latest v0.4.0 — see [backend/CHANGELOG.md](backend/CHANGELOG.md). Highlights: Windows backend now ships as a tray-first `touchpad-server.exe` (no console); tray icon toggles the log window.
+- **Windows backend:** latest v0.4.1 — see [backend/CHANGELOG.md](backend/CHANGELOG.md). Highlights: backend now switches to the active Windows input desktop before sending input, improving non-locking screensaver support.
 - **webOS add-on:** latest v0.3.2 — see [addon/webos-pointer-bridge/CHANGELOG.md](addon/webos-pointer-bridge/CHANGELOG.md). Highlights: aarch64 add-on builds now use the multi-arch Home Assistant base image.
 
 ## Screenshots
