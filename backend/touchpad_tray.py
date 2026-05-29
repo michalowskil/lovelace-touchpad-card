@@ -28,7 +28,7 @@ from ws_touchpad import serve
 
 LOG_FORMAT = "%(asctime)s [%(levelname)s] %(message)s"
 QUEUE_LIMIT = 1000
-APP_VERSION = "0.4.1"
+APP_VERSION = "0.5.0"
 LATEST_RELEASE_API_URL = "https://api.github.com/repos/michalowskil/lovelace-touchpad-card/releases/latest"
 LATEST_RELEASE_URL = "https://github.com/michalowskil/lovelace-touchpad-card/releases/latest"
 UPDATE_CHECK_INITIAL_DELAY_MS = 10_000

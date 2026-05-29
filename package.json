@@ -1,6 +1,6 @@
 {
   "name": "touchpad",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "main": "dist/touchpad-card.js",
   "scripts": {
     "build": "node ./scripts/build.js",
