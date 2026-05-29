@@ -55,8 +55,8 @@ Add the card in the UI and configure everything from the visual editor.
 
 ## webOS backend (Home Assistant add-on)
 
-1. In Home Assistant go to **Settings -> Add-ons -> Add-on store -> ... -> Repositories** and add  
-   `https://github.com/michalowskil/lovelace-touchpad-card`.
+1. In Home Assistant, go to Settings -> Apps -> Install app, open the three-dot menu, choose Repositories, and add:  
+   `https://github.com/michalowskil/lovelace-touchpad-card`
 2. Install **webOS Pointer Bridge** from the add-on list.
 3. Open the add-on configuration and list your TVs. Example:
 
