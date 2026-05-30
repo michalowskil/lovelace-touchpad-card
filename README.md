@@ -82,7 +82,7 @@ Add the card in the UI and configure everything from the visual editor.
 - For remote/HTTPS, use `wss://` (e.g., reverse proxy). LAN can stay `ws://`.
 
 ## Changelog
-- **Card (frontend):** latest v0.6.0 — see [CHANGELOG.md](CHANGELOG.md). Highlights: one card can switch between multiple configured endpoints.
+- **Card (frontend):** latest v0.6.1 — see [CHANGELOG.md](CHANGELOG.md). Highlights: editor fixes for single-device and multi-device configuration.
 - **Windows backend:** latest v0.5.1 — see [backend/CHANGELOG.md](backend/CHANGELOG.md). Highlights: tray update checks now track the Windows backend version, so card-only releases do not notify Windows users.
 - **webOS add-on:** latest v0.3.2 — see [addon/webos-pointer-bridge/CHANGELOG.md](addon/webos-pointer-bridge/CHANGELOG.md). Highlights: aarch64 add-on builds now use the multi-arch Home Assistant base image.
 

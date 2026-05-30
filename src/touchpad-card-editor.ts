@@ -60,14 +60,16 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
   @state() private _selectedDeviceIndex = 0;
 
   public setConfig(config: TouchpadCardConfig): void {
-    this._config = { ...config };
-    const devices = this._devicesFromConfig(this._config);
-    if (devices.length === 0) {
+    const devices = this._devicesFromConfig(config);
+    this._config = devices.length === 1 ? this._singleConfigFromDevice(config, devices[0]) : { ...config };
+
+    const currentDevices = this._devicesFromConfig(this._config);
+    if (currentDevices.length === 0) {
       this._selectedDeviceIndex = 0;
       return;
     }
-    if (this._selectedDeviceIndex >= devices.length) {
-      this._selectedDeviceIndex = devices.length - 1;
+    if (this._selectedDeviceIndex >= currentDevices.length) {
+      this._selectedDeviceIndex = currentDevices.length - 1;
     }
   }
 
@@ -76,11 +78,23 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
 
     const config = this._currentConfig();
     const devices = this._devicesFromConfig(config);
+    const singleConfig = devices.length === 1 ? this._singleConfigFromDevice(config, devices[0]) : config;
 
     return html`
       <div class="editor">
-        ${devices.length > 0 ? this._renderMultiDeviceConfig(devices) : this._renderSingleDeviceConfig(config)}
+        ${this._renderCardConfig(config)}
+        ${devices.length > 1 ? this._renderMultiDeviceConfig(devices) : this._renderSingleDeviceConfig(singleConfig)}
       </div>
+    `;
+  }
+
+  private _renderCardConfig(config: TouchpadCardConfig): TemplateResult {
+    return html`
+      <section class="config-section">
+        <div class="fields">
+          ${this._renderThemeModeField(this._themeModeValue(config), (value) => this._updateRootField('theme_mode', value))}
+        </div>
+      </section>
     `;
   }
 
@@ -90,7 +104,6 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
         <div class="section-header">
           <div>
             <h3>Single device</h3>
-            <p>Use one WebSocket endpoint for this card.</p>
           </div>
           <button class="secondary" type="button" @click=${this._addDevice}>Add device</button>
         </div>
@@ -100,7 +113,6 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
             this._updateRootField('wsUrl', value)
           )}
           ${this._renderControlsProfileField(this._controlsProfileValue(config), (value) => this._updateRootField('controls_profile', value))}
-          ${this._renderThemeModeField(this._themeModeValue(config), (value) => this._updateRootField('theme_mode', value))}
         </div>
 
         ${this._renderOptions(config, (field, value) => this._updateRootField(field, value))}
@@ -118,13 +130,8 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
         <div class="section-header">
           <div>
             <h3>Devices</h3>
-            <p>The card opens the last used device, or the first device when there is no saved choice.</p>
           </div>
           <button class="secondary" type="button" @click=${this._addDevice}>Add device</button>
-        </div>
-
-        <div class="fields">
-          ${this._renderThemeModeField(this._themeModeValue(this._currentConfig()), (value) => this._updateRootField('theme_mode', value))}
         </div>
 
         <div class="tabs" role="tablist">
@@ -380,9 +387,38 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
     if (devices.length <= 1) return;
 
     devices.splice(index, 1);
+    if (devices.length === 1) {
+      this._selectedDeviceIndex = 0;
+      this._commitConfig(this._singleConfigFromDevice(config, devices[0]));
+      return;
+    }
+
     const next: TouchpadCardConfig = { ...config, devices };
     this._selectedDeviceIndex = Math.max(0, Math.min(index, devices.length - 1));
     this._commitConfig(next);
+  }
+
+  private _singleConfigFromDevice(config: TouchpadCardConfig, device: TouchpadDeviceConfig): TouchpadCardConfig {
+    const next: TouchpadCardConfig = {
+      ...config,
+      wsUrl: device.wsUrl,
+      controls_profile: this._asControlsProfile(device.controls_profile ?? device.backend ?? config.controls_profile ?? config.backend ?? 'pc'),
+      show_lock: device.show_lock,
+      show_speed_buttons: device.show_speed_buttons,
+      show_status_text: device.show_status_text,
+      show_audio_controls: device.show_audio_controls,
+      show_keyboard_button: device.show_keyboard_button,
+      auto_focus_keyboard: device.auto_focus_keyboard,
+      invert_scroll: device.invert_scroll,
+      sensitivity: device.sensitivity,
+      scroll_multiplier: device.scroll_multiplier,
+      double_tap_ms: device.double_tap_ms,
+      tap_suppression_px: device.tap_suppression_px,
+    };
+
+    delete next.devices;
+    delete next.backend;
+    return next;
   }
 
   private _singleConfigToDevice(config: TouchpadCardConfig): TouchpadDeviceConfig {
@@ -546,6 +582,9 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
 
   static styles = css`
     .editor {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
       padding: 12px;
       color: var(--primary-text-color);
     }

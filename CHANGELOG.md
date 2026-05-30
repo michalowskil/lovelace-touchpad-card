@@ -1,5 +1,10 @@
 # Card Changelog
 
+## 0.6.1
+- Fixed the card editor so a configuration returns to the single-device layout after removing devices down to one.
+- Kept the theme selector visible for both single-device and multi-device configurations.
+- Removed redundant helper text from the card editor device sections.
+
 ## 0.6.0
 - Added optional multi-device mode. A single card can now switch between configured endpoints.
 - Multi-device cards now remember speed, lock, and keyboard-panel state separately per device.
