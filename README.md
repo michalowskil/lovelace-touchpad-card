@@ -16,7 +16,8 @@ If you like this project, please consider giving it a ⭐ on GitHub: [![Star on 
 - Keyboard panel for text input plus arrows/Home/End/PageUp/PageDown.
 - Built-in volume controls (up/down/mute).
 - Speed toggles x2/x3/x4 (one active at a time).
-- Remembers selected toggles (speed, lock, keyboard panel) per view.
+- Optional multi-device mode with quick switching between configured endpoints.
+- Remembers selected toggles (speed, lock, keyboard panel) per device and dashboard view.
 - Works over LAN WebSocket (`ws://...`); switch to `wss://` for remote.
 
 ## Installation
@@ -41,14 +42,11 @@ Add the card in the UI and configure everything from the visual editor.
 
 ## Windows server
 
-1. Download `touchpad-server.exe` from the latest release on GitHub.
-2. Run:
-   ```powershell
-   touchpad-server.exe --host 0.0.0.0 --port 8765
-   ```
-   - Starts directly in the system tray. Double-click the tray icon (or use the first menu item) to show/hide the log window. Closing/minimizing that window only hides it; the server keeps running.
+1. Download `touchpad-server.exe` from the [latest release](https://github.com/michalowskil/lovelace-touchpad-card/releases/latest) on GitHub.
+2. Run `touchpad-server.exe`.
+   - Starts directly in the system tray. Click the tray icon (or use the first menu item) to show/hide the log window. Closing/minimizing that window only hides it; the server keeps running.
    - SmartScreen may show ```Windows protected your PC``` because the file is unsigned. Click **More info** → **Run anyway**, or build from source yourself if you prefer.
-   - Host and port are optional; defaults are `0.0.0.0` and `8765`.
+   - Host and port are optional; defaults are `0.0.0.0` and `8765`. To override them, run for example: `touchpad-server.exe --host 0.0.0.0 --port 8765`.
 3. Allow it through Windows Firewall on first run so the card can connect.
 4. To auto-start, place a shortcut to `touchpad-server.exe` in Startup or create a scheduled task.
 5. Logs are written to `touchpad-server.log` next to the executable. Use the tray icon to view them live.
@@ -84,8 +82,8 @@ Add the card in the UI and configure everything from the visual editor.
 - For remote/HTTPS, use `wss://` (e.g., reverse proxy). LAN can stay `ws://`.
 
 ## Changelog
-- **Card (frontend):** latest v0.3.1 — see [CHANGELOG.md](CHANGELOG.md). Highlights: editor numeric fields easier to edit; defaults shown so blanks fall back sensibly.
-- **Windows backend:** latest v0.5.0 — see [backend/CHANGELOG.md](backend/CHANGELOG.md). Highlights: backend now switches to the active Windows input desktop before sending input, improving non-locking screensaver support and can notify when a newer release is available.
+- **Card (frontend):** latest v0.6.0 — see [CHANGELOG.md](CHANGELOG.md). Highlights: one card can switch between multiple configured endpoints.
+- **Windows backend:** latest v0.5.1 — see [backend/CHANGELOG.md](backend/CHANGELOG.md). Highlights: tray update checks now track the Windows backend version, so card-only releases do not notify Windows users.
 - **webOS add-on:** latest v0.3.2 — see [addon/webos-pointer-bridge/CHANGELOG.md](addon/webos-pointer-bridge/CHANGELOG.md). Highlights: aarch64 add-on builds now use the multi-arch Home Assistant base image.
 
 ## Screenshots

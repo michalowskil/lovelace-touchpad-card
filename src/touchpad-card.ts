@@ -1,7 +1,7 @@
 import { css, html, LitElement, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { HomeAssistant, LovelaceCardEditor } from 'custom-card-helpers';
-import { KeyCommand, TouchpadCardConfig, TouchpadMessage, VolumeAction } from './types';
+import { KeyCommand, TouchpadCardConfig, TouchpadControlsProfile, TouchpadDeviceConfig, TouchpadMessage, VolumeAction } from './types';
 import './touchpad-card-editor';
 
 type PointerGesture = 'move' | 'scroll' | null;
@@ -18,6 +18,40 @@ interface PointerState {
 interface LockedPanState {
   id: number;
   lastY: number;
+}
+
+interface ResolvedTouchpadDevice extends TouchpadDeviceConfig {
+  id: string;
+  name: string;
+  wsUrl: string;
+  controlsProfile: TouchpadControlsProfile;
+}
+
+interface TouchpadRuntimeOptions {
+  controlsProfile: TouchpadControlsProfile;
+  sensitivity: number;
+  scrollMultiplier: number;
+  invertScroll: boolean;
+  doubleTapMs: number;
+  tapSuppressionPx: number;
+  showLock: boolean;
+  showSpeedButtons: boolean;
+  showStatusText: boolean;
+  showAudioControls: boolean;
+  showKeyboardButton: boolean;
+  autoFocusKeyboard: boolean;
+}
+
+interface PersistedDeviceUiState {
+  locked?: boolean;
+  speedMultiplier?: number;
+  keyboardOpen?: boolean;
+}
+
+interface PersistedUiState extends PersistedDeviceUiState {
+  activeDeviceId?: string;
+  deviceIds?: string[];
+  deviceStates?: Record<string, PersistedDeviceUiState>;
 }
 
 const HOLD_DELAY_MS = 320;
@@ -53,7 +87,7 @@ function logCardWarn(message: string, detail?: unknown): void {
 }
 
 const DEFAULTS = {
-  backend: 'pc' as 'pc' | 'webos',
+  controlsProfile: 'pc' as TouchpadControlsProfile,
   sensitivity: 1,
   scrollMultiplier: 1,
   invertScroll: false,
@@ -64,14 +98,19 @@ const DEFAULTS = {
   showStatusText: true,
   showAudioControls: true,
   showKeyboardButton: true,
+  autoFocusKeyboard: true,
 };
+
+function createStorageId(): string {
+  return `tp_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+}
 
 @customElement('touchpad-card')
 export class TouchpadCard extends LitElement {
   @property({ attribute: false }) public hass?: HomeAssistant;
   @state() private _config?: TouchpadCardConfig;
-  @state() private _connected = false;
-  @state() private _status: 'disconnected' | 'connecting' | 'connected' | 'error' = 'disconnected';
+  @state() private _devices: ResolvedTouchpadDevice[] = [];
+  @state() private _activeDeviceId?: string;
   @state() private _statusDisplay: 'disconnected' | 'connecting' | 'connected' | 'error' = 'disconnected';
   @state() private _locked = false;
   @state() private _speedMultiplier: 1 | 2 | 3 | 4 = 1;
@@ -84,6 +123,7 @@ export class TouchpadCard extends LitElement {
   private detachTimer?: number;
   private wsErrorNotified = false;
   private reconnectDelayMs = RECONNECT_BASE_MS;
+  private socketGeneration = 0;
 
   private pointers = new Map<number, PointerState>();
   private gesture: PointerGesture = null;
@@ -95,8 +135,8 @@ export class TouchpadCard extends LitElement {
   private dragPointerId?: number;
   private lockedPan?: LockedPanState;
 
-  private opts = {
-    backend: DEFAULTS.backend,
+  private opts: TouchpadRuntimeOptions = {
+    controlsProfile: DEFAULTS.controlsProfile,
     sensitivity: DEFAULTS.sensitivity,
     scrollMultiplier: DEFAULTS.scrollMultiplier,
     invertScroll: DEFAULTS.invertScroll,
@@ -107,6 +147,7 @@ export class TouchpadCard extends LitElement {
     showStatusText: DEFAULTS.showStatusText,
     showAudioControls: DEFAULTS.showAudioControls,
     showKeyboardButton: DEFAULTS.showKeyboardButton,
+    autoFocusKeyboard: DEFAULTS.autoFocusKeyboard,
   };
 
   public static async getConfigElement(): Promise<LovelaceCardEditor> {
@@ -116,40 +157,32 @@ export class TouchpadCard extends LitElement {
   public static getStubConfig(): TouchpadCardConfig {
     return {
       type: 'custom:touchpad-card',
+      storage_id: createStorageId(),
       wsUrl: 'ws://YOUR-PC-LAN-IP:8765',
-      backend: DEFAULTS.backend,
+      controls_profile: DEFAULTS.controlsProfile,
       show_lock: DEFAULTS.showLock,
       show_speed_buttons: DEFAULTS.showSpeedButtons,
       show_status_text: DEFAULTS.showStatusText,
       show_audio_controls: DEFAULTS.showAudioControls,
       show_keyboard_button: DEFAULTS.showKeyboardButton,
+      auto_focus_keyboard: DEFAULTS.autoFocusKeyboard,
     };
   }
 
   public setConfig(config: TouchpadCardConfig): void {
-    if (!config.wsUrl) {
-      throw new Error('wsUrl is required');
-    }
+    const devices = this.normalizeDevices(config);
 
     this._config = config;
-    this.opts = {
-      backend: config.backend === 'webos' ? 'webos' : DEFAULTS.backend,
-      sensitivity: config.sensitivity ?? DEFAULTS.sensitivity,
-      scrollMultiplier: config.scroll_multiplier ?? DEFAULTS.scrollMultiplier,
-      invertScroll: config.invert_scroll ?? DEFAULTS.invertScroll,
-      doubleTapMs: config.double_tap_ms ?? DEFAULTS.doubleTapMs,
-      tapSuppressionPx: config.tap_suppression_px ?? DEFAULTS.tapSuppressionPx,
-      showLock: config.show_lock ?? DEFAULTS.showLock,
-      showSpeedButtons: config.show_speed_buttons ?? DEFAULTS.showSpeedButtons,
-      showStatusText: config.show_status_text ?? DEFAULTS.showStatusText,
-      showAudioControls: config.show_audio_controls ?? DEFAULTS.showAudioControls,
-      showKeyboardButton: config.show_keyboard_button ?? DEFAULTS.showKeyboardButton,
-    };
+    this._devices = devices;
+    this._activeDeviceId = this.initialActiveDeviceId(devices);
+    this.applyActiveDeviceOptions();
 
     this._locked = false;
     this._keyboardOpen = false;
     this._speedMultiplier = 1;
     this.restoreUiState();
+    this.applyActiveDeviceOptions();
+    this.reconnectDelayMs = RECONNECT_BASE_MS;
     this.connect();
   }
 
@@ -192,10 +225,120 @@ export class TouchpadCard extends LitElement {
     }, 2000);
   }
 
-  private connect(): void {
-    this.teardownSocket();
+  private normalizeControlsProfile(profile?: TouchpadControlsProfile): TouchpadControlsProfile {
+    return profile === 'webos' ? 'webos' : DEFAULTS.controlsProfile;
+  }
 
-    if (!this._config?.wsUrl) {
+  private configuredControlsProfile(config: Pick<TouchpadDeviceConfig, 'controls_profile' | 'backend'>): TouchpadControlsProfile | undefined {
+    return config.controls_profile ?? config.backend;
+  }
+
+  private resolveOptions(config: TouchpadCardConfig, device?: TouchpadDeviceConfig): TouchpadRuntimeOptions {
+    return {
+      controlsProfile: this.normalizeControlsProfile(this.configuredControlsProfile(device ?? config) ?? this.configuredControlsProfile(config)),
+      sensitivity: device?.sensitivity ?? config.sensitivity ?? DEFAULTS.sensitivity,
+      scrollMultiplier: device?.scroll_multiplier ?? config.scroll_multiplier ?? DEFAULTS.scrollMultiplier,
+      invertScroll: device?.invert_scroll ?? config.invert_scroll ?? DEFAULTS.invertScroll,
+      doubleTapMs: device?.double_tap_ms ?? config.double_tap_ms ?? DEFAULTS.doubleTapMs,
+      tapSuppressionPx: device?.tap_suppression_px ?? config.tap_suppression_px ?? DEFAULTS.tapSuppressionPx,
+      showLock: device?.show_lock ?? config.show_lock ?? DEFAULTS.showLock,
+      showSpeedButtons: device?.show_speed_buttons ?? config.show_speed_buttons ?? DEFAULTS.showSpeedButtons,
+      showStatusText: device?.show_status_text ?? config.show_status_text ?? DEFAULTS.showStatusText,
+      showAudioControls: device?.show_audio_controls ?? config.show_audio_controls ?? DEFAULTS.showAudioControls,
+      showKeyboardButton: device?.show_keyboard_button ?? config.show_keyboard_button ?? DEFAULTS.showKeyboardButton,
+      autoFocusKeyboard: device?.auto_focus_keyboard ?? config.auto_focus_keyboard ?? DEFAULTS.autoFocusKeyboard,
+    };
+  }
+
+  private normalizeDevices(config: TouchpadCardConfig): ResolvedTouchpadDevice[] {
+    if (Array.isArray(config.devices) && config.devices.length > 0) {
+      const seen = new Set<string>();
+      return config.devices.map((device, index) => {
+        const id = String(device?.id ?? '').trim();
+        const wsUrl = String(device?.wsUrl ?? '').trim();
+
+        if (!id) {
+          throw new Error(`devices[${index}].id is required`);
+        }
+        if (!wsUrl) {
+          throw new Error(`devices[${index}].wsUrl is required`);
+        }
+        if (seen.has(id)) {
+          throw new Error(`Duplicate touchpad device id: ${id}`);
+        }
+        seen.add(id);
+
+        const name = String(device?.name ?? id).trim() || id;
+        return {
+          ...device,
+          id,
+          name,
+          wsUrl,
+          controlsProfile: this.normalizeControlsProfile(this.configuredControlsProfile(device) ?? this.configuredControlsProfile(config)),
+        };
+      });
+    }
+
+    const wsUrl = String(config.wsUrl ?? '').trim();
+    if (!wsUrl) {
+      throw new Error('Either wsUrl or devices is required');
+    }
+
+    const controlsProfile = this.normalizeControlsProfile(this.configuredControlsProfile(config));
+    return [
+      {
+        id: 'default',
+        name: controlsProfile === 'webos' ? 'TV' : 'PC',
+        wsUrl,
+        controlsProfile,
+        controls_profile: controlsProfile,
+        sensitivity: config.sensitivity,
+        scroll_multiplier: config.scroll_multiplier,
+        invert_scroll: config.invert_scroll,
+        double_tap_ms: config.double_tap_ms,
+        tap_suppression_px: config.tap_suppression_px,
+        show_lock: config.show_lock,
+        show_speed_buttons: config.show_speed_buttons,
+        show_status_text: config.show_status_text,
+        show_audio_controls: config.show_audio_controls,
+        show_keyboard_button: config.show_keyboard_button,
+        auto_focus_keyboard: config.auto_focus_keyboard,
+      },
+    ];
+  }
+
+  private initialActiveDeviceId(devices: ResolvedTouchpadDevice[]): string | undefined {
+    if (this._activeDeviceId && devices.some((device) => device.id === this._activeDeviceId)) {
+      return this._activeDeviceId;
+    }
+
+    return devices[0]?.id;
+  }
+
+  private get activeDevice(): ResolvedTouchpadDevice | undefined {
+    return this._devices.find((device) => device.id === this._activeDeviceId) ?? this._devices[0];
+  }
+
+  private applyActiveDeviceOptions(): void {
+    if (!this._config) return;
+    this.opts = this.resolveOptions(this._config, this.activeDevice);
+    if (!this.opts.showKeyboardButton) {
+      this._keyboardOpen = false;
+    }
+    if (!this.opts.showLock) {
+      this._locked = false;
+    }
+    if (!this.opts.showSpeedButtons) {
+      this._speedMultiplier = 1;
+    }
+  }
+
+  private connect(): void {
+    const generation = ++this.socketGeneration;
+    this.teardownSocket(false);
+
+    const device = this.activeDevice;
+    if (!device?.wsUrl) {
       this.setStatus('disconnected');
       return;
     }
@@ -203,15 +346,15 @@ export class TouchpadCard extends LitElement {
     this.setStatus('connecting');
     this.wsErrorNotified = false;
     try {
-      this.socket = new WebSocket(this._config.wsUrl);
+      this.socket = new WebSocket(device.wsUrl);
     } catch (err) {
-      logCardError('Failed to initialize WebSocket connection. Check backend.', err);
+      logCardError('Failed to initialize WebSocket connection. Check WebSocket URL.', err);
       this.setStatus('error');
       return;
     }
 
     this.socket.addEventListener('open', () => {
-      this._connected = true;
+      if (generation !== this.socketGeneration) return;
       this.wsErrorNotified = false;
       this.reconnectDelayMs = RECONNECT_BASE_MS;
       this.setStatus('connected');
@@ -219,16 +362,17 @@ export class TouchpadCard extends LitElement {
     });
 
     this.socket.addEventListener('close', () => {
-      this._connected = false;
+      if (generation !== this.socketGeneration) return;
       this.setStatus('connecting');
       this.requestUpdate();
       this.scheduleReconnect();
     });
 
     this.socket.addEventListener('error', (event) => {
-      const backendLabel = this.opts.backend === 'webos' ? 'webOS' : 'Windows';
+      if (generation !== this.socketGeneration) return;
+      const deviceLabel = this.deviceStatusLabel();
       if (!this.wsErrorNotified) {
-        logCardError(`WebSocket error (${backendLabel}).`, event);
+        logCardError(`WebSocket error (${deviceLabel}).`, event);
         this.wsErrorNotified = true;
       }
       this.setStatus('error');
@@ -249,7 +393,10 @@ export class TouchpadCard extends LitElement {
     this.reconnectDelayMs = Math.min(Math.round(this.reconnectDelayMs * 1.8), RECONNECT_MAX_MS);
   }
 
-  private teardownSocket(): void {
+  private teardownSocket(invalidate = true): void {
+    if (invalidate) {
+      this.socketGeneration += 1;
+    }
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = undefined;
@@ -272,35 +419,127 @@ export class TouchpadCard extends LitElement {
     }
   }
 
+  private viewStorageId(): string {
+    return window?.location?.pathname ?? '';
+  }
+
+  private appStorageId(): string {
+    return navigator?.userAgent ?? 'unknown';
+  }
+
+  private configStorageId(): string {
+    return String(this._config?.storage_id ?? '').trim();
+  }
+
+  private persistenceKeyBase(): string {
+    return `touchpad-card:${this.viewStorageId()}`;
+  }
+
+  private legacySingleDevicePersistenceKey(): string | null {
+    const ws = this._config?.wsUrl ?? this._devices[0]?.wsUrl;
+    return ws ? `touchpad-card:${ws}:${this.viewStorageId()}:${this.appStorageId()}` : null;
+  }
+
   private persistenceKey(): string | null {
-    const ws = this._config?.wsUrl;
-    if (!ws) return null;
-    const appId = navigator?.userAgent ?? 'unknown';
-    const viewId = window?.location?.pathname ?? '';
-    return `touchpad-card:${ws}:${viewId}:${appId}`;
+    const baseKey = this.persistenceKeyBase();
+    const storageId = this.configStorageId();
+
+    if (storageId) {
+      return `${baseKey}:${storageId}`;
+    }
+
+    if (!Array.isArray(this._config?.devices)) {
+      return this.legacySingleDevicePersistenceKey();
+    }
+
+    return null;
+  }
+
+  private previousPersistenceKeys(): string[] {
+    const baseKey = this.persistenceKeyBase();
+    const currentKey = this.persistenceKey();
+    const legacySingleKey = this.legacySingleDevicePersistenceKey();
+    return [legacySingleKey, baseKey, `${baseKey}:card`].filter(
+      (key, index, keys): key is string => Boolean(key) && key !== currentKey && keys.indexOf(key) === index
+    );
+  }
+
+  private readPersistedUiState(store: Storage, key: string): PersistedUiState | null {
+    try {
+      const raw = store.getItem(key);
+      if (!raw) return null;
+      return JSON.parse(raw) as PersistedUiState;
+    } catch (err) {
+      logCardWarn('Failed to read touchpad UI state.', err);
+      return null;
+    }
+  }
+
+  private loadPersistedUiState(): PersistedUiState | null {
+    const store = this.storageAvailable();
+    const key = this.persistenceKey();
+    if (!store || !key) return null;
+
+    for (const previousKey of this.previousPersistenceKeys()) {
+      const previousState = this.readPersistedUiState(store, previousKey);
+      if (!previousState) {
+        continue;
+      }
+      try {
+        store.setItem(key, JSON.stringify(previousState));
+        store.removeItem(previousKey);
+      } catch (err) {
+        logCardWarn('Failed to move touchpad UI state.', err);
+      }
+      return previousState;
+    }
+
+    return this.readPersistedUiState(store, key);
+  }
+
+  private isSpeedMultiplier(value: unknown): value is 1 | 2 | 3 | 4 {
+    return value === 1 || value === 2 || value === 3 || value === 4;
+  }
+
+  private activeDeviceStorageId(): string | undefined {
+    return this.activeDevice?.id ?? this._activeDeviceId;
+  }
+
+  private resetUiToggles(): void {
+    this._locked = false;
+    this._speedMultiplier = 1;
+    this._keyboardOpen = false;
+  }
+
+  private restoreDeviceUiState(parsed: PersistedUiState | null = this.loadPersistedUiState()): void {
+    const deviceId = this.activeDeviceStorageId();
+    const deviceState = deviceId ? parsed?.deviceStates?.[deviceId] : undefined;
+    const legacyState =
+      parsed && (typeof parsed.locked === 'boolean' || this.isSpeedMultiplier(parsed.speedMultiplier) || typeof parsed.keyboardOpen === 'boolean')
+        ? parsed
+        : undefined;
+    const state = deviceState ?? legacyState;
+
+    this.resetUiToggles();
+    if (typeof state?.locked === 'boolean') {
+      this._locked = state.locked;
+    }
+    if (this.isSpeedMultiplier(state?.speedMultiplier)) {
+      this._speedMultiplier = state.speedMultiplier;
+    }
+    if (typeof state?.keyboardOpen === 'boolean') {
+      this._keyboardOpen = state.keyboardOpen;
+    }
+    this.applyActiveDeviceOptions();
   }
 
   private restoreUiState(): void {
-    const store = this.storageAvailable();
-    const key = this.persistenceKey();
-    if (!store || !key) return;
+    const parsed = this.loadPersistedUiState();
     try {
-      const raw = store.getItem(key);
-      if (!raw) return;
-      const parsed = JSON.parse(raw) as Partial<{
-        locked: boolean;
-        speedMultiplier: number;
-        keyboardOpen: boolean;
-      }>;
-      if (typeof parsed.locked === 'boolean') {
-        this._locked = parsed.locked;
+      if (typeof parsed?.activeDeviceId === 'string' && this._devices.some((device) => device.id === parsed.activeDeviceId)) {
+        this._activeDeviceId = parsed.activeDeviceId;
       }
-      if (parsed.speedMultiplier === 1 || parsed.speedMultiplier === 2 || parsed.speedMultiplier === 3 || parsed.speedMultiplier === 4) {
-        this._speedMultiplier = parsed.speedMultiplier;
-      }
-      if (typeof parsed.keyboardOpen === 'boolean' && this.opts.showKeyboardButton) {
-        this._keyboardOpen = parsed.keyboardOpen;
-      }
+      this.restoreDeviceUiState(parsed);
     } catch (err) {
       logCardWarn('Failed to restore touchpad UI state.', err);
     }
@@ -311,12 +550,30 @@ export class TouchpadCard extends LitElement {
     const key = this.persistenceKey();
     if (!store || !key) return;
     try {
-      store.setItem(
-        key,
-        JSON.stringify({
+      const parsed = this.loadPersistedUiState();
+      const validDeviceIds = new Set(this._devices.map((device) => device.id));
+      const deviceStates: Record<string, PersistedDeviceUiState> = {};
+      Object.entries(parsed?.deviceStates ?? {}).forEach(([deviceId, state]) => {
+        if (validDeviceIds.has(deviceId)) {
+          deviceStates[deviceId] = state;
+        }
+      });
+
+      const activeDeviceId = this.activeDeviceStorageId();
+      if (activeDeviceId) {
+        deviceStates[activeDeviceId] = {
           locked: this._locked,
           speedMultiplier: this._speedMultiplier,
           keyboardOpen: this.opts.showKeyboardButton ? this._keyboardOpen : false,
+        };
+      }
+
+      store.setItem(
+        key,
+        JSON.stringify({
+          activeDeviceId: this._activeDeviceId,
+          deviceIds: this._devices.map((device) => device.id),
+          deviceStates,
         })
       );
     } catch (err) {
@@ -324,15 +581,13 @@ export class TouchpadCard extends LitElement {
     }
   }
 
-  private setStatus(next: 'disconnected' | 'connecting' | 'connected' | 'error'): void {
-    this._status = next;
-
+  private setStatus(next: 'disconnected' | 'connecting' | 'connected' | 'error', immediate = false): void {
     if (this.statusTimer) {
       clearTimeout(this.statusTimer);
       this.statusTimer = undefined;
     }
 
-    if (next === 'connected') {
+    if (next === 'connected' || immediate) {
       this._statusDisplay = next;
       return;
     }
@@ -758,7 +1013,7 @@ export class TouchpadCard extends LitElement {
     if (!this.opts.showKeyboardButton) return;
     this._keyboardOpen = !this._keyboardOpen;
     this.persistUiState();
-    if (this._keyboardOpen) {
+    if (this._keyboardOpen && this.opts.autoFocusKeyboard) {
       window.setTimeout(() => {
         const input = this.renderRoot?.querySelector('.keyboard-input') as HTMLInputElement | null;
         input?.focus();
@@ -771,17 +1026,62 @@ export class TouchpadCard extends LitElement {
     this.persistUiState();
   }
 
+  private selectDevice(id: string): void {
+    if (id === this._activeDeviceId || !this._devices.some((device) => device.id === id)) {
+      return;
+    }
+
+    this.persistUiState();
+    this.resetInteractionState();
+    this._activeDeviceId = id;
+    this.applyActiveDeviceOptions();
+    this.restoreDeviceUiState();
+    this.reconnectDelayMs = RECONNECT_BASE_MS;
+    this.persistUiState();
+    this.setStatus('connecting', true);
+    this.connect();
+  }
+
+  private resetInteractionState(): void {
+    this.cancelHoldTimer();
+    if (this.tapTimer) {
+      clearTimeout(this.tapTimer);
+      this.tapTimer = undefined;
+    }
+    if (this.rafHandle != null) {
+      window.cancelAnimationFrame(this.rafHandle);
+      this.rafHandle = undefined;
+    }
+    if (this.dragPointerId != null) {
+      this.sendButton('up');
+      this.dragPointerId = undefined;
+    }
+    this.pointers.clear();
+    this.gesture = null;
+    this.lastTapTime = 0;
+    this.lockedPan = undefined;
+    this.moveAccum = { x: 0, y: 0 };
+    this.scrollAccum = { x: 0, y: 0 };
+  }
+
+  private deviceStatusLabel(): string {
+    if (this._devices.length > 1) {
+      return this.activeDevice?.name ?? 'Device';
+    }
+    return this.opts.controlsProfile === 'webos' ? 'TV' : 'PC';
+  }
+
   private statusLabel(): string {
-    const backendLabel = this.opts.backend === 'webos' ? 'TV' : 'PC';
+    const deviceLabel = this.deviceStatusLabel();
     switch (this._statusDisplay) {
       case 'connected':
-        return `${backendLabel} Connected`;
+        return `${deviceLabel} Connected`;
       case 'connecting':
-        return `${backendLabel} Connecting...`;
+        return `${deviceLabel} Connecting...`;
       case 'error':
-        return `${backendLabel} Connection error`;
+        return `${deviceLabel} Connection error`;
       default:
-        return `${backendLabel} Disconnected`;
+        return `${deviceLabel} Disconnected`;
     }
   }
 
@@ -789,7 +1089,8 @@ export class TouchpadCard extends LitElement {
     if (!this._config) return nothing;
 
     const showKeyboardSection = this.opts.showKeyboardButton && this._keyboardOpen;
-    const isWebos = this.opts.backend === 'webos';
+    const showDeviceTabs = this._devices.length > 1;
+    const isWebos = this.opts.controlsProfile === 'webos';
     const keyboardPlaceholder = isWebos ? 'Tap to type on TV' : 'Tap to type on PC';
     const leftButtons = isWebos
       ? [
@@ -817,7 +1118,29 @@ export class TouchpadCard extends LitElement {
 
     return html`
       <ha-card @contextmenu=${(e: Event) => e.preventDefault()}>
-        <div class="surface ${this._locked ? 'locked' : ''} ${showKeyboardSection ? 'with-keyboard' : ''}">
+        ${showDeviceTabs
+          ? html`<div class="device-tabs" role="tablist">
+              ${this._devices.map(
+                (device) => html`<button
+                  class="device-tab ${device.id === this._activeDeviceId ? 'active' : ''}"
+                  type="button"
+                  role="tab"
+                  aria-selected=${device.id === this._activeDeviceId ? 'true' : 'false'}
+                  @click=${(e: Event) => {
+                    e.stopPropagation();
+                    this.selectDevice(device.id);
+                  }}
+                >
+                  ${device.name}
+                </button>`
+              )}
+            </div>`
+          : nothing}
+        <div
+          class="surface ${this._locked ? 'locked' : ''} ${showKeyboardSection ? 'with-keyboard' : ''} ${showDeviceTabs
+            ? 'with-device-tabs'
+            : ''}"
+        >
           ${this.opts.showSpeedButtons
             ? html`<div class="speed-buttons">
                 ${[2, 3, 4].map(
@@ -931,6 +1254,52 @@ export class TouchpadCard extends LitElement {
       overflow: hidden;
     }
 
+    .device-tabs {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      padding: 10px 12px;
+      overflow-x: auto;
+      background: #161c29;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      scrollbar-width: none;
+    }
+
+    .device-tabs::-webkit-scrollbar {
+      display: none;
+    }
+
+    .device-tab {
+      flex: 0 0 auto;
+      min-width: 0;
+      max-width: 160px;
+      height: 34px;
+      padding: 0 14px;
+      overflow: hidden;
+      border-radius: 10px;
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      background: rgba(255, 255, 255, 0.04);
+      color: #9ea7b7;
+      cursor: pointer;
+      font-size: 13px;
+      line-height: 32px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      transition: all 140ms ease;
+    }
+
+    .device-tab:hover {
+      border-color: rgba(255, 255, 255, 0.32);
+      color: #e5ecff;
+    }
+
+    .device-tab.active {
+      border-color: rgba(255, 152, 0, 0.5);
+      color: #ffb74d;
+      background: rgba(255, 152, 0, 0.08);
+      box-shadow: 0 0 0 1px rgba(255, 152, 0, 0.18);
+    }
+
     .surface {
       position: relative;
       height: 280px;
@@ -940,6 +1309,11 @@ export class TouchpadCard extends LitElement {
       color: #f5f5f5;
       user-select: none;
       touch-action: none;
+    }
+
+    .surface.with-device-tabs {
+      border-top-left-radius: 0;
+      border-top-right-radius: 0;
     }
 
     .surface.with-keyboard {

@@ -91,13 +91,25 @@ jobs:
           python -m pip install pyinstaller -r backend/requirements.txt
 
       - name: Build Windows backend (PyInstaller)
-        run: pyinstaller --onefile --noconsole --name touchpad-server --distpath dist backend/touchpad_tray.py
+        run: pyinstaller --onefile --noconsole --add-data "backend/VERSION;." --name touchpad-server --distpath dist backend/touchpad_tray.py
+
+      - name: Write backend version manifest
+        run: |
+          $version = (Get-Content backend/VERSION -Raw).Trim()
+          $manifest = [ordered]@{
+            name = 'touchpad-server'
+            version = $version
+            asset = 'touchpad-server.exe'
+          }
+          $manifest | ConvertTo-Json | Set-Content -Path dist/touchpad-server.version.json -Encoding utf8
 
       - name: Upload backend asset to existing release
         if: github.event_name == 'release'
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/touchpad-server.exe
+          files: |
+            dist/touchpad-server.exe
+            dist/touchpad-server.version.json
 
       - name: Upload backend asset for tag push
         if: github.event_name == 'push' && github.ref_type == 'tag'
@@ -106,4 +118,6 @@ jobs:
           tag_name: ${{ github.ref_name }}
           prerelease: ${{ contains(github.ref_name, '-beta') }}
           generate_release_notes: false
-          files: dist/touchpad-server.exe
+          files: |
+            dist/touchpad-server.exe
+            dist/touchpad-server.version.json

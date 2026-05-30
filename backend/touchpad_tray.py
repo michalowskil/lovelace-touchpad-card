@@ -28,12 +28,34 @@ from ws_touchpad import serve
 
 LOG_FORMAT = "%(asctime)s [%(levelname)s] %(message)s"
 QUEUE_LIMIT = 1000
-APP_VERSION = "0.5.0"
+VERSION_FILE_NAME = "VERSION"
+SERVER_VERSION_ASSET_NAME = "touchpad-server.version.json"
+DEFAULT_APP_VERSION = "unknown"
 LATEST_RELEASE_API_URL = "https://api.github.com/repos/michalowskil/lovelace-touchpad-card/releases/latest"
 LATEST_RELEASE_URL = "https://github.com/michalowskil/lovelace-touchpad-card/releases/latest"
 UPDATE_CHECK_INITIAL_DELAY_MS = 10_000
 UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000
 UPDATE_CHECK_TIMEOUT_SECONDS = 10
+
+
+def _resource_dir() -> Path:
+    bundled_dir = getattr(sys, "_MEIPASS", None)
+    if bundled_dir:
+        return Path(str(bundled_dir))
+    return Path(__file__).resolve().parent
+
+
+def _read_app_version() -> str:
+    try:
+        version = (_resource_dir() / VERSION_FILE_NAME).read_text(encoding="utf-8").strip()
+        if version.lower().startswith("v"):
+            version = version[1:]
+        return version or DEFAULT_APP_VERSION
+    except Exception:
+        return DEFAULT_APP_VERSION
+
+
+APP_VERSION = _read_app_version()
 
 
 def hide_console_window() -> None:
@@ -214,7 +236,7 @@ class TrayApp:
         self.server_thread = ServerThread(self.host, self.port, self.scroll_scale, self.stop_event)
         self.update_check_running = False
         self.update_timer: Optional[str] = None
-        self.notified_release: Optional[str] = None
+        self.notified_server_version: Optional[str] = None
         self.latest_release_url = LATEST_RELEASE_URL
 
         self._attach_log_handlers()
@@ -314,7 +336,7 @@ class TrayApp:
         latest: Optional[dict[str, Any]] = None
         error: Optional[BaseException] = None
         try:
-            latest = self._fetch_latest_release()
+            latest = self._fetch_latest_server_update()
         except Exception as err:
             error = err
         self.root.after(0, lambda: self._finish_update_check(latest, error, notify_when_current, reschedule))
@@ -328,7 +350,34 @@ class TrayApp:
             },
         )
         with urllib.request.urlopen(request, timeout=UPDATE_CHECK_TIMEOUT_SECONDS) as response:
-            return json.loads(response.read().decode("utf-8"))
+            return json.loads(response.read().decode("utf-8-sig"))
+
+    def _fetch_latest_server_update(self) -> dict[str, Any]:
+        release = self._fetch_latest_release()
+        manifest_url = _release_asset_url(release, SERVER_VERSION_ASSET_NAME)
+        update = {
+            "release_tag": str(release.get("tag_name") or ""),
+            "release_url": str(release.get("html_url") or LATEST_RELEASE_URL),
+            "manifest_url": manifest_url,
+            "server_version": "",
+        }
+        if not manifest_url:
+            return update
+
+        manifest = self._fetch_json(manifest_url)
+        update["server_version"] = str(manifest.get("version") or "").strip()
+        return update
+
+    def _fetch_json(self, url: str) -> dict[str, Any]:
+        request = urllib.request.Request(
+            url,
+            headers={
+                "Accept": "application/json",
+                "User-Agent": f"touchpad-server/{APP_VERSION}",
+            },
+        )
+        with urllib.request.urlopen(request, timeout=UPDATE_CHECK_TIMEOUT_SECONDS) as response:
+            return json.loads(response.read().decode("utf-8-sig"))
 
     def _finish_update_check(
         self,
@@ -351,25 +400,53 @@ class TrayApp:
         if latest is None:
             return
 
-        latest_tag = str(latest.get("tag_name") or "")
-        if not latest_tag:
+        release_tag = str(latest.get("release_tag") or "")
+        if not release_tag:
             logging.info("Update check returned no release tag.")
             return
 
-        latest_url = str(latest.get("html_url") or LATEST_RELEASE_URL)
+        latest_url = str(latest.get("release_url") or LATEST_RELEASE_URL)
         self.latest_release_url = latest_url
 
-        if _is_newer_version(latest_tag, APP_VERSION):
-            logging.info("New touchpad release available: %s", latest_tag)
-            if notify_when_current or self.notified_release != latest_tag:
-                self.notified_release = latest_tag
+        latest_server_version = str(latest.get("server_version") or "").strip()
+        if not latest_server_version:
+            logging.info(
+                "Latest release %s does not include %s; skipping touchpad server update notification.",
+                release_tag,
+                SERVER_VERSION_ASSET_NAME,
+            )
+            if notify_when_current:
+                self._notify("Touchpad server", "Latest release does not include touchpad server version information.")
+            return
+
+        if not _parse_version(APP_VERSION):
+            logging.info("Current touchpad server version is unavailable; skipping update comparison.")
+            if notify_when_current:
+                self._notify("Touchpad server", "Could not determine the current touchpad server version.")
+            return
+
+        if not _parse_version(latest_server_version):
+            logging.info("Latest touchpad server version is invalid: %s", latest_server_version)
+            if notify_when_current:
+                self._notify("Touchpad server", "Latest release has invalid touchpad server version information.")
+            return
+
+        if _is_newer_version(latest_server_version, APP_VERSION):
+            logging.info("New touchpad server version available: %s (release %s)", latest_server_version, release_tag)
+            if notify_when_current or self.notified_server_version != latest_server_version:
+                self.notified_server_version = latest_server_version
                 self._notify(
                     "Touchpad server update available",
-                    f"{latest_tag} is available. Open the tray menu and download the new touchpad-server.exe from the latest release.",
+                    f"Version {latest_server_version} is available. Open the tray menu and download the new touchpad-server.exe from the latest release.",
                 )
             return
 
-        logging.info("No newer touchpad release found (current %s, latest %s).", APP_VERSION, latest_tag)
+        logging.info(
+            "No newer touchpad server version found (current %s, latest server %s, release %s).",
+            APP_VERSION,
+            latest_server_version,
+            release_tag,
+        )
         if notify_when_current:
             self._notify("Touchpad server", f"No newer version found. You are running {APP_VERSION}.")
 
@@ -427,6 +504,18 @@ def _is_newer_version(latest: str, current: str) -> bool:
     latest_parts = _parse_version(latest)
     current_parts = _parse_version(current)
     return bool(latest_parts and current_parts and latest_parts > current_parts)
+
+
+def _release_asset_url(release: dict[str, Any], name: str) -> str:
+    assets = release.get("assets")
+    if not isinstance(assets, list):
+        return ""
+    for asset in assets:
+        if not isinstance(asset, dict):
+            continue
+        if asset.get("name") == name:
+            return str(asset.get("browser_download_url") or "")
+    return ""
 
 
 def parse_args() -> argparse.Namespace:
