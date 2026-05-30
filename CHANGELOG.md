@@ -3,6 +3,7 @@
 ## 0.6.0
 - Added optional multi-device mode. A single card can now switch between configured endpoints.
 - Multi-device cards now remember speed, lock, and keyboard-panel state separately per device.
+- Added light, dark, and automatic theme modes.
 - Added an editor option to disable automatic focus when opening the keyboard panel.
 - Renamed the UI/backend selector to `controls_profile`; existing `backend` YAML remains supported as an alias.
 

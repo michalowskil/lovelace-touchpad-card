@@ -2,7 +2,7 @@ import { css, html, LitElement } from 'lit';
 import type { TemplateResult } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { fireEvent, HomeAssistant, LovelaceCardEditor } from 'custom-card-helpers';
-import { TouchpadCardConfig, TouchpadControlsProfile, TouchpadDeviceConfig, TouchpadOptionConfig } from './types';
+import { TouchpadCardConfig, TouchpadControlsProfile, TouchpadDeviceConfig, TouchpadOptionConfig, TouchpadThemeMode } from './types';
 
 type BooleanOptionField =
   | 'show_lock'
@@ -100,6 +100,7 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
             this._updateRootField('wsUrl', value)
           )}
           ${this._renderControlsProfileField(this._controlsProfileValue(config), (value) => this._updateRootField('controls_profile', value))}
+          ${this._renderThemeModeField(this._themeModeValue(config), (value) => this._updateRootField('theme_mode', value))}
         </div>
 
         ${this._renderOptions(config, (field, value) => this._updateRootField(field, value))}
@@ -120,6 +121,10 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
             <p>The card opens the last used device, or the first device when there is no saved choice.</p>
           </div>
           <button class="secondary" type="button" @click=${this._addDevice}>Add device</button>
+        </div>
+
+        <div class="fields">
+          ${this._renderThemeModeField(this._themeModeValue(this._currentConfig()), (value) => this._updateRootField('theme_mode', value))}
         </div>
 
         <div class="tabs" role="tablist">
@@ -249,6 +254,19 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
     `;
   }
 
+  private _renderThemeModeField(value: TouchpadThemeMode, update: (value: TouchpadThemeMode) => void): TemplateResult {
+    return html`
+      <label class="field">
+        <span>Theme</span>
+        <select .value=${value} @change=${(ev: Event) => update(this._asThemeMode((ev.target as HTMLSelectElement).value))}>
+          <option value="auto">Automatic</option>
+          <option value="dark">Dark</option>
+          <option value="light">Light</option>
+        </select>
+      </label>
+    `;
+  }
+
   private _currentConfig(): TouchpadCardConfig {
     return {
       type: 'custom:touchpad-card',
@@ -277,6 +295,10 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
     return this._asControlsProfile(source.controls_profile ?? source.backend ?? this._config?.controls_profile ?? this._config?.backend ?? 'pc');
   }
 
+  private _themeModeValue(source: Pick<TouchpadCardConfig, 'theme_mode'>): TouchpadThemeMode {
+    return this._asThemeMode(source.theme_mode ?? this._config?.theme_mode ?? 'auto');
+  }
+
   private _parseNumber(value: string): number | undefined {
     if (value.trim() === '') return undefined;
     const parsed = Number(value);
@@ -285,6 +307,10 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
 
   private _asControlsProfile(value: string): TouchpadControlsProfile {
     return value === 'webos' ? 'webos' : 'pc';
+  }
+
+  private _asThemeMode(value: string): TouchpadThemeMode {
+    return value === 'dark' || value === 'light' ? value : 'auto';
   }
 
   private _updateRootField(field: keyof TouchpadCardConfig, value: unknown): void {

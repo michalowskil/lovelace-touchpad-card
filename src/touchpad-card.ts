@@ -1,7 +1,15 @@
 import { css, html, LitElement, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { HomeAssistant, LovelaceCardEditor } from 'custom-card-helpers';
-import { KeyCommand, TouchpadCardConfig, TouchpadControlsProfile, TouchpadDeviceConfig, TouchpadMessage, VolumeAction } from './types';
+import {
+  KeyCommand,
+  TouchpadCardConfig,
+  TouchpadControlsProfile,
+  TouchpadDeviceConfig,
+  TouchpadMessage,
+  TouchpadThemeMode,
+  VolumeAction,
+} from './types';
 import './touchpad-card-editor';
 
 type PointerGesture = 'move' | 'scroll' | null;
@@ -28,6 +36,7 @@ interface ResolvedTouchpadDevice extends TouchpadDeviceConfig {
 }
 
 interface TouchpadRuntimeOptions {
+  themeMode: TouchpadThemeMode;
   controlsProfile: TouchpadControlsProfile;
   sensitivity: number;
   scrollMultiplier: number;
@@ -87,6 +96,7 @@ function logCardWarn(message: string, detail?: unknown): void {
 }
 
 const DEFAULTS = {
+  themeMode: 'auto' as TouchpadThemeMode,
   controlsProfile: 'pc' as TouchpadControlsProfile,
   sensitivity: 1,
   scrollMultiplier: 1,
@@ -136,6 +146,7 @@ export class TouchpadCard extends LitElement {
   private lockedPan?: LockedPanState;
 
   private opts: TouchpadRuntimeOptions = {
+    themeMode: DEFAULTS.themeMode,
     controlsProfile: DEFAULTS.controlsProfile,
     sensitivity: DEFAULTS.sensitivity,
     scrollMultiplier: DEFAULTS.scrollMultiplier,
@@ -158,6 +169,7 @@ export class TouchpadCard extends LitElement {
     return {
       type: 'custom:touchpad-card',
       storage_id: createStorageId(),
+      theme_mode: DEFAULTS.themeMode,
       wsUrl: 'ws://YOUR-PC-LAN-IP:8765',
       controls_profile: DEFAULTS.controlsProfile,
       show_lock: DEFAULTS.showLock,
@@ -229,12 +241,25 @@ export class TouchpadCard extends LitElement {
     return profile === 'webos' ? 'webos' : DEFAULTS.controlsProfile;
   }
 
+  private normalizeThemeMode(themeMode?: TouchpadThemeMode): TouchpadThemeMode {
+    return themeMode === 'dark' || themeMode === 'light' ? themeMode : DEFAULTS.themeMode;
+  }
+
+  private effectiveThemeMode(): 'dark' | 'light' {
+    if (this.opts.themeMode !== 'auto') {
+      return this.opts.themeMode;
+    }
+    const hassWithThemes = this.hass as HomeAssistant & { themes?: { darkMode?: boolean } };
+    return hassWithThemes.themes?.darkMode ? 'dark' : 'light';
+  }
+
   private configuredControlsProfile(config: Pick<TouchpadDeviceConfig, 'controls_profile' | 'backend'>): TouchpadControlsProfile | undefined {
     return config.controls_profile ?? config.backend;
   }
 
   private resolveOptions(config: TouchpadCardConfig, device?: TouchpadDeviceConfig): TouchpadRuntimeOptions {
     return {
+      themeMode: this.normalizeThemeMode(config.theme_mode),
       controlsProfile: this.normalizeControlsProfile(this.configuredControlsProfile(device ?? config) ?? this.configuredControlsProfile(config)),
       sensitivity: device?.sensitivity ?? config.sensitivity ?? DEFAULTS.sensitivity,
       scrollMultiplier: device?.scroll_multiplier ?? config.scroll_multiplier ?? DEFAULTS.scrollMultiplier,
@@ -1091,6 +1116,7 @@ export class TouchpadCard extends LitElement {
     const showKeyboardSection = this.opts.showKeyboardButton && this._keyboardOpen;
     const showDeviceTabs = this._devices.length > 1;
     const isWebos = this.opts.controlsProfile === 'webos';
+    const themeClass = `theme-${this.effectiveThemeMode()}`;
     const keyboardPlaceholder = isWebos ? 'Tap to type on TV' : 'Tap to type on PC';
     const leftButtons = isWebos
       ? [
@@ -1117,7 +1143,7 @@ export class TouchpadCard extends LitElement {
     ];
 
     return html`
-      <ha-card @contextmenu=${(e: Event) => e.preventDefault()}>
+      <ha-card class=${themeClass} @contextmenu=${(e: Event) => e.preventDefault()}>
         ${showDeviceTabs
           ? html`<div class="device-tabs" role="tablist">
               ${this._devices.map(
@@ -1254,14 +1280,66 @@ export class TouchpadCard extends LitElement {
       overflow: hidden;
     }
 
+    ha-card.theme-dark {
+      --tp-panel-bg: #161c29;
+      --tp-surface-bg: linear-gradient(135deg, #1f2736, #2a3347);
+      --tp-text: #f5f5f5;
+      --tp-strong-text: #e5ecff;
+      --tp-muted-text: #9ea7b7;
+      --tp-subtle-text: rgba(255, 255, 255, 0.7);
+      --tp-control-bg: rgba(255, 255, 255, 0.04);
+      --tp-control-bg-strong: rgba(255, 255, 255, 0.05);
+      --tp-control-hover-bg: rgba(255, 255, 255, 0.12);
+      --tp-border-subtle: rgba(255, 255, 255, 0.14);
+      --tp-border-medium: rgba(255, 255, 255, 0.18);
+      --tp-border-strong: rgba(255, 255, 255, 0.32);
+      --tp-divider: rgba(255, 255, 255, 0.06);
+      --tp-surface-inset: rgba(255, 255, 255, 0.04);
+      --tp-input-bg: rgba(255, 255, 255, 0.04);
+      --tp-input-border: rgba(255, 255, 255, 0.12);
+      --tp-input-focus-ring: rgba(255, 255, 255, 0.08);
+      --tp-status-shadow: rgba(0, 0, 0, 0.3);
+      --tp-accent: #ff9800;
+      --tp-accent-soft: #ffb74d;
+      --tp-accent-border: rgba(255, 152, 0, 0.5);
+      --tp-accent-bg: rgba(255, 152, 0, 0.08);
+      --tp-accent-ring: rgba(255, 152, 0, 0.2);
+    }
+
+    ha-card.theme-light {
+      --tp-panel-bg: #f7f9fc;
+      --tp-surface-bg: linear-gradient(135deg, #eef3f8, #dfe8f1);
+      --tp-text: #1f2937;
+      --tp-strong-text: #111827;
+      --tp-muted-text: #5f6b7a;
+      --tp-subtle-text: rgba(31, 41, 55, 0.72);
+      --tp-control-bg: rgba(255, 255, 255, 0.72);
+      --tp-control-bg-strong: rgba(255, 255, 255, 0.86);
+      --tp-control-hover-bg: rgba(255, 255, 255, 0.98);
+      --tp-border-subtle: rgba(30, 41, 59, 0.16);
+      --tp-border-medium: rgba(30, 41, 59, 0.2);
+      --tp-border-strong: rgba(30, 41, 59, 0.34);
+      --tp-divider: rgba(30, 41, 59, 0.1);
+      --tp-surface-inset: rgba(15, 23, 42, 0.08);
+      --tp-input-bg: rgba(255, 255, 255, 0.94);
+      --tp-input-border: rgba(30, 41, 59, 0.18);
+      --tp-input-focus-ring: rgba(30, 41, 59, 0.08);
+      --tp-status-shadow: rgba(255, 255, 255, 0.72);
+      --tp-accent: #d97706;
+      --tp-accent-soft: #b45309;
+      --tp-accent-border: rgba(217, 119, 6, 0.48);
+      --tp-accent-bg: rgba(217, 119, 6, 0.12);
+      --tp-accent-ring: rgba(217, 119, 6, 0.18);
+    }
+
     .device-tabs {
       display: flex;
       gap: 8px;
       align-items: center;
       padding: 10px 12px;
       overflow-x: auto;
-      background: #161c29;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      background: var(--tp-panel-bg);
+      border-bottom: 1px solid var(--tp-divider);
       scrollbar-width: none;
     }
 
@@ -1277,9 +1355,9 @@ export class TouchpadCard extends LitElement {
       padding: 0 14px;
       overflow: hidden;
       border-radius: 10px;
-      border: 1px solid rgba(255, 255, 255, 0.14);
-      background: rgba(255, 255, 255, 0.04);
-      color: #9ea7b7;
+      border: 1px solid var(--tp-border-subtle);
+      background: var(--tp-control-bg);
+      color: var(--tp-muted-text);
       cursor: pointer;
       font-size: 13px;
       line-height: 32px;
@@ -1289,24 +1367,24 @@ export class TouchpadCard extends LitElement {
     }
 
     .device-tab:hover {
-      border-color: rgba(255, 255, 255, 0.32);
-      color: #e5ecff;
+      border-color: var(--tp-border-strong);
+      color: var(--tp-strong-text);
     }
 
     .device-tab.active {
-      border-color: rgba(255, 152, 0, 0.5);
-      color: #ffb74d;
-      background: rgba(255, 152, 0, 0.08);
-      box-shadow: 0 0 0 1px rgba(255, 152, 0, 0.18);
+      border-color: var(--tp-accent-border);
+      color: var(--tp-accent-soft);
+      background: var(--tp-accent-bg);
+      box-shadow: 0 0 0 1px var(--tp-accent-ring);
     }
 
     .surface {
       position: relative;
       height: 280px;
-      background: linear-gradient(135deg, #1f2736, #2a3347);
+      background: var(--tp-surface-bg);
       border-radius: 12px;
-      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
-      color: #f5f5f5;
+      box-shadow: inset 0 0 0 1px var(--tp-surface-inset);
+      color: var(--tp-text);
       user-select: none;
       touch-action: none;
     }
@@ -1345,8 +1423,8 @@ export class TouchpadCard extends LitElement {
       font-size: 12px;
       letter-spacing: 0.12em;
       background: transparent;
-      border: 1px solid rgba(255, 255, 255, 0.18);
-      color: #9ea7b7;
+      border: 1px solid var(--tp-border-medium);
+      color: var(--tp-muted-text);
       padding: 6px 10px;
       border-radius: 10px;
       cursor: pointer;
@@ -1355,9 +1433,9 @@ export class TouchpadCard extends LitElement {
     }
 
     .lock.active {
-      color: #ff9800;
-      border-color: rgba(255, 152, 0, 0.5);
-      box-shadow: 0 0 0 1px rgba(255, 152, 0, 0.2);
+      color: var(--tp-accent);
+      border-color: var(--tp-accent-border);
+      box-shadow: 0 0 0 1px var(--tp-accent-ring);
     }
 
     .status {
@@ -1365,8 +1443,8 @@ export class TouchpadCard extends LitElement {
       left: 14px;
       bottom: 12px;
       font-size: 13px;
-      color: rgba(255, 255, 255, 0.7);
-      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+      color: var(--tp-subtle-text);
+      text-shadow: 0 1px 2px var(--tp-status-shadow);
       pointer-events: none;
     }
 
@@ -1383,8 +1461,8 @@ export class TouchpadCard extends LitElement {
       font-size: 12px;
       letter-spacing: 0.08em;
       background: transparent;
-      border: 1px solid rgba(255, 255, 255, 0.18);
-      color: #9ea7b7;
+      border: 1px solid var(--tp-border-medium);
+      color: var(--tp-muted-text);
       padding: 6px 10px;
       border-radius: 10px;
       cursor: pointer;
@@ -1392,9 +1470,9 @@ export class TouchpadCard extends LitElement {
     }
 
     .speed.active {
-      color: #ff9800;
-      border-color: rgba(255, 152, 0, 0.5);
-      box-shadow: 0 0 0 1px rgba(255, 152, 0, 0.2);
+      color: var(--tp-accent);
+      border-color: var(--tp-accent-border);
+      box-shadow: 0 0 0 1px var(--tp-accent-ring);
     }
 
     .audio-stack {
@@ -1415,17 +1493,17 @@ export class TouchpadCard extends LitElement {
       align-items: center;
       justify-content: center;
       border-radius: 12px;
-      border: 1px solid rgba(255, 255, 255, 0.16);
-      background: rgba(255, 255, 255, 0.04);
-      color: #e5ecff;
+      border: 1px solid var(--tp-border-subtle);
+      background: var(--tp-control-bg);
+      color: var(--tp-strong-text);
       cursor: pointer;
       font-size: 16px;
       transition: all 140ms ease;
     }
 
     .icon-btn:hover {
-      border-color: rgba(255, 255, 255, 0.32);
-      background: rgba(255, 255, 255, 0.12);
+      border-color: var(--tp-border-strong);
+      background: var(--tp-control-hover-bg);
     }
 
     .icon-btn:active {
@@ -1444,23 +1522,23 @@ export class TouchpadCard extends LitElement {
       align-items: center;
       justify-content: center;
       border-radius: 14px;
-      border: 1px solid rgba(255, 255, 255, 0.18);
-      background: rgba(255, 255, 255, 0.05);
-      color: #9ea7b7;
+      border: 1px solid var(--tp-border-medium);
+      background: var(--tp-control-bg-strong);
+      color: var(--tp-muted-text);
       cursor: pointer;
       font-size: 17px;
       transition: all 140ms ease;
     }
 
     .keyboard-toggle:hover {
-      border-color: rgba(255, 255, 255, 0.32);
-      color: #e5ecff;
+      border-color: var(--tp-border-strong);
+      color: var(--tp-strong-text);
     }
 
     .keyboard-toggle.active {
-      color: #ff9800;
-      border-color: rgba(255, 152, 0, 0.5);
-      box-shadow: 0 0 0 1px rgba(255, 152, 0, 0.2);
+      color: var(--tp-accent);
+      border-color: var(--tp-accent-border);
+      box-shadow: 0 0 0 1px var(--tp-accent-ring);
     }
     .icon-btn ha-icon,
     .keyboard-toggle ha-icon {
@@ -1477,8 +1555,8 @@ export class TouchpadCard extends LitElement {
       gap: 12px;
       align-items: flex-start;
       padding: 12px 14px 14px;
-      background: #161c29;
-      border-top: 1px solid rgba(255, 255, 255, 0.06);
+      background: var(--tp-panel-bg);
+      border-top: 1px solid var(--tp-divider);
       border-bottom-left-radius: 12px;
       border-bottom-right-radius: 12px;
     }
@@ -1547,28 +1625,28 @@ export class TouchpadCard extends LitElement {
       padding: 8px 12px;
       font-size: 13px;
       border-radius: 10px;
-      border: 1px solid rgba(255, 255, 255, 0.14);
-      background: rgba(255, 255, 255, 0.05);
-      color: #e5ecff;
+      border: 1px solid var(--tp-border-subtle);
+      background: var(--tp-control-bg-strong);
+      color: var(--tp-strong-text);
       cursor: pointer;
       transition: all 140ms ease;
     }
     .pill:hover {
-      border-color: rgba(255, 255, 255, 0.32);
-      background: rgba(255, 255, 255, 0.12);
+      border-color: var(--tp-border-strong);
+      background: var(--tp-control-hover-bg);
     }
     .keyboard-input {
       padding: 10px 12px;
       border-radius: 10px;
-      border: 1px solid rgba(255, 255, 255, 0.12);
-      background: rgba(255, 255, 255, 0.04);
-      color: #f5f5f5;
+      border: 1px solid var(--tp-input-border);
+      background: var(--tp-input-bg);
+      color: var(--tp-text);
       font-size: 14px;
       outline: none;
     }
     .keyboard-input:focus {
-      border-color: rgba(255, 255, 255, 0.32);
-      box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08);
+      border-color: var(--tp-border-strong);
+      box-shadow: 0 0 0 1px var(--tp-input-focus-ring);
     }
   `;
 }

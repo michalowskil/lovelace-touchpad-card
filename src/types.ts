@@ -1,6 +1,7 @@
 import { LovelaceCardConfig } from 'custom-card-helpers';
 
 export type TouchpadControlsProfile = 'pc' | 'webos';
+export type TouchpadThemeMode = 'auto' | 'dark' | 'light';
 
 export interface TouchpadEndpointConfig {
   wsUrl?: string;
@@ -32,6 +33,7 @@ export interface TouchpadDeviceConfig extends TouchpadEndpointConfig, TouchpadOp
 export interface TouchpadCardConfig extends LovelaceCardConfig, TouchpadEndpointConfig, TouchpadOptionConfig {
   type: string;
   storage_id?: string;
+  theme_mode?: TouchpadThemeMode;
   devices?: TouchpadDeviceConfig[];
 }
 
