@@ -77,9 +77,63 @@ Add the card in the UI and configure everything from the visual editor.
 4. Start the add-on and enable **Start on boot** and **Watchdog** if desired.
 5. In each touchpad card set `wsUrl` to the matching port (for example `ws://homeassistant.local:8777`).
 
-## Notes
-- Card sends deltas in `requestAnimationFrame` (throttled); backend accumulates scroll into wheel steps.
-- For remote/HTTPS, use `wss://` (e.g., reverse proxy). LAN can stay `ws://`.
+## Remote access over HTTPS/WSS
+
+If you open Home Assistant through HTTPS (for example DuckDNS + NGINX), do not use a plain `ws://...` URL in the card. Browsers treat that as mixed content: Home Assistant is secure, but the card opens an insecure WebSocket, so the page may show as **Not secure** and the connection may be blocked.
+
+Both backends listen with plain WebSocket (`ws://`) on their local ports:
+
+- Windows server: usually `ws://YOUR-PC-LAN-IP:8765`
+- webOS Pointer Bridge add-on: for example `ws://YOUR-HA-LAN-IP:8778`
+
+To use either backend remotely, put it behind your existing HTTPS reverse proxy and connect to it with `wss://`.
+
+Example with the **NGINX Home Assistant SSL proxy** add-on:
+
+1. In the NGINX add-on configuration, enable custom config files:
+
+   ```yaml
+   customize:
+     active: true
+     default: nginx_proxy_default*.conf
+     servers: nginx_proxy/*.conf
+   ```
+
+2. Create one config file per backend in Home Assistant. For example:
+
+   ```text
+   /share/nginx_proxy_default_touchpad-livingroom-tv.conf
+   /share/nginx_proxy_default_touchpad-pc.conf
+   ```
+
+   The filename matters. Files matching `nginx_proxy_default*.conf` are added inside the existing Home Assistant HTTPS server, so they may contain `location` blocks. Files under `/share/nginx_proxy/*.conf` are for complete `server { ... }` blocks and will fail if you put only a `location` block there.
+
+3. Put a matching `location` block in each file. The path after `location` is the public WebSocket path you will use in the card. `proxy_pass` points to the real backend inside your LAN.
+
+   Example for a TV bridge running on your Home Assistant host:
+
+   ```nginx
+   location /touchpad-livingroom-tv {
+       proxy_pass http://192.168.0.123:8778;
+       proxy_http_version 1.1;
+
+       proxy_set_header Upgrade $http_upgrade;
+       proxy_set_header Connection "upgrade";
+       proxy_set_header Host $host;
+
+       proxy_read_timeout 86400;
+   }
+   ```
+
+4. Restart the NGINX add-on.
+
+5. In the touchpad card, use the HTTPS WebSocket URL that matches your `location` path:
+
+   ```yaml
+   wsUrl: wss://your-domain.duckdns.org/touchpad-livingroom-tv
+   ```
+
+For remote access, you only need to expose your HTTPS port (usually `443`) to the internet. Do not expose backend ports (for example `8765` or `8778`) directly unless you understand the risk: these WebSocket backends do not add their own login screen.
 
 ## Changelog
 - **Card (frontend):** latest v0.6.1 — see [CHANGELOG.md](CHANGELOG.md). Highlights: editor fixes for single-device and multi-device configuration.
