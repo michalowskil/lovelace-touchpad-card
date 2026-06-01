@@ -15,6 +15,7 @@ If you like this project, please consider giving it a ⭐ on GitHub: [![Star on 
 - Two-finger short tap = right click.
 - Keyboard panel for text input plus arrows/Home/End/PageUp/PageDown.
 - Built-in volume controls (up/down/mute).
+- Optional webOS app launcher buttons for services such as Netflix, Disney+, YouTube, and Prime Video.
 - Speed toggles x2/x3/x4 (one active at a time).
 - Optional multi-device mode with quick switching between configured endpoints.
 - Remembers selected toggles (speed, lock, keyboard panel) per device and dashboard view.
@@ -77,6 +78,29 @@ Add the card in the UI and configure everything from the visual editor.
 4. Start the add-on and enable **Start on boot** and **Watchdog** if desired.
 5. In each touchpad card set `wsUrl` to the matching port (for example `ws://homeassistant.local:8777`).
 
+## Optional webOS App Buttons
+
+For a webOS device, set **Controls profile** to **LG webOS controls** and enable **Show webOS app buttons** in the card editor. The card then shows app buttons below the touchpad surface.
+
+When the bridge can read the TV app list, buttons for apps that are not installed are shown dimmed. If the TV cannot provide that list, the buttons stay clickable; a failed launch shows a short message and dims that app for the current session.
+
+You can add apps manually, or use **Add from TV** in the editor. **Add from TV** asks the configured bridge for the TV's installed app list. If the TV provides it, pick the apps you want to add; if it does not, keep using manual entries.
+
+App IDs can vary between TV models, regions, or app version. Therefore, the card allows you to enter any app ID.
+
+Each app needs `app_id` and at least one visible value: `name` or `icon`. That means all of these are valid:
+
+```yaml
+webos_apps:
+  - name: YouTube
+    app_id: youtube.leanback.v4
+    icon: mdi:youtube
+  - app_id: spotify-beehive
+    icon: mdi:spotify
+  - name: HDMI 1
+    app_id: com.webos.app.hdmi1
+```
+
 ## Remote access over HTTPS/WSS
 
 If you open Home Assistant through HTTPS (for example DuckDNS + NGINX), do not use a plain `ws://...` URL in the card. Browsers treat that as mixed content: Home Assistant is secure, but the card opens an insecure WebSocket, so the page may show as **Not secure** and the connection may be blocked.
@@ -136,13 +160,14 @@ Example with the **NGINX Home Assistant SSL proxy** add-on:
 For remote access, you only need to expose your HTTPS port (usually `443`) to the internet. Do not expose backend ports (for example `8765` or `8778`) directly unless you understand the risk: these WebSocket backends do not add their own login screen.
 
 ## Changelog
-- **Card (frontend):** latest v0.6.1 — see [CHANGELOG.md](CHANGELOG.md). Highlights: editor fixes for single-device and multi-device configuration.
+- **Card (frontend):** latest v0.7.0 — see [CHANGELOG.md](CHANGELOG.md). Highlights: optional webOS app launcher buttons with editor/YAML configuration and app availability feedback.
 - **Windows backend:** latest v0.5.1 — see [backend/CHANGELOG.md](backend/CHANGELOG.md). Highlights: tray update checks now track the Windows backend version, so card-only releases do not notify Windows users.
-- **webOS add-on:** latest v0.3.2 — see [addon/webos-pointer-bridge/CHANGELOG.md](addon/webos-pointer-bridge/CHANGELOG.md). Highlights: aarch64 add-on builds now use the multi-arch Home Assistant base image.
+- **webOS add-on:** latest v0.4.0 — see [addon/webos-pointer-bridge/CHANGELOG.md](addon/webos-pointer-bridge/CHANGELOG.md). Highlights: app launch support plus installed-app reporting for the card editor picker.
 
 ## Screenshots
 
-![card configuration](screenshots/dark.png)
-![card configuration](screenshots/light.png)
-![card configuration](screenshots/visibility.png)
+![card configuration](screenshots/editor1.png)
+![card configuration](screenshots/editor2.png)
+![card configuration](screenshots/editor3.png)
+![card configuration](screenshots/editor4.png)
 ![tray and log](screenshots/tray-and-log.png)

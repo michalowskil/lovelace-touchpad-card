@@ -2,7 +2,16 @@ import { css, html, LitElement } from 'lit';
 import type { TemplateResult } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { fireEvent, HomeAssistant, LovelaceCardEditor } from 'custom-card-helpers';
-import { TouchpadCardConfig, TouchpadControlsProfile, TouchpadDeviceConfig, TouchpadOptionConfig, TouchpadThemeMode } from './types';
+import {
+  TouchpadCardConfig,
+  TouchpadControlsProfile,
+  TouchpadDeviceConfig,
+  TouchpadOptionConfig,
+  TouchpadServerMessage,
+  TouchpadThemeMode,
+  WebOSAppConfig,
+} from './types';
+import { DEFAULT_WEBOS_APPS, defaultWebOSAppIcon } from './webos-apps';
 
 type BooleanOptionField =
   | 'show_lock'
@@ -10,6 +19,7 @@ type BooleanOptionField =
   | 'show_status_text'
   | 'show_audio_controls'
   | 'show_keyboard_button'
+  | 'show_app_buttons'
   | 'auto_focus_keyboard'
   | 'invert_scroll';
 
@@ -21,6 +31,7 @@ const BOOLEAN_DEFAULTS: Record<BooleanOptionField, boolean> = {
   show_status_text: true,
   show_audio_controls: true,
   show_keyboard_button: true,
+  show_app_buttons: false,
   auto_focus_keyboard: true,
   invert_scroll: false,
 };
@@ -38,6 +49,7 @@ const BOOLEAN_FIELDS: Array<{ field: BooleanOptionField; label: string }> = [
   { field: 'show_status_text', label: 'Show status text' },
   { field: 'show_audio_controls', label: 'Show audio icons' },
   { field: 'show_keyboard_button', label: 'Show keyboard toggle' },
+  { field: 'show_app_buttons', label: 'Show webOS app buttons' },
   { field: 'auto_focus_keyboard', label: 'Focus keyboard input when opened' },
   { field: 'invert_scroll', label: 'Reverse scroll direction' },
 ];
@@ -49,6 +61,13 @@ const NUMBER_FIELDS: Array<{ field: NumberOptionField; label: string; step: stri
   { field: 'tap_suppression_px', label: 'Max move allowed for tap (px)', step: '1' },
 ];
 
+interface TVAppPickerState {
+  apps: WebOSAppConfig[];
+  loading: boolean;
+  message?: string;
+  sourceKey?: string;
+}
+
 function createStorageId(): string {
   return `tp_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
 }
@@ -58,6 +77,8 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
   @property({ attribute: false }) public hass?: HomeAssistant;
   @state() private _config?: TouchpadCardConfig;
   @state() private _selectedDeviceIndex = 0;
+  @state() private _tvAppPicker: TVAppPickerState = { apps: [], loading: false };
+  private _tvAppRequestToken = 0;
 
   public setConfig(config: TouchpadCardConfig): void {
     const devices = this._devicesFromConfig(config);
@@ -115,7 +136,9 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
           ${this._renderControlsProfileField(this._controlsProfileValue(config), (value) => this._updateRootField('controls_profile', value))}
         </div>
 
-        ${this._renderOptions(config, (field, value) => this._updateRootField(field, value))}
+        ${this._renderOptions(config, this._controlsProfileValue(config), config.wsUrl ?? '', (field, value) =>
+          this._updateRootField(field, value)
+        )}
       </section>
     `;
   }
@@ -179,20 +202,27 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
           )}
         </div>
 
-        ${this._renderOptions(device, (field, value) => this._updateDeviceField(index, field, value))}
+        ${this._renderOptions(device, this._controlsProfileValue(device), device.wsUrl ?? '', (field, value) =>
+          this._updateDeviceField(index, field, value)
+        )}
       </div>
     `;
   }
 
   private _renderOptions(
     source: TouchpadOptionConfig,
-    update: (field: BooleanOptionField | NumberOptionField, value: boolean | number | undefined) => void
+    controlsProfile: TouchpadControlsProfile,
+    wsUrl: string,
+    update: (field: keyof TouchpadOptionConfig, value: unknown) => void
   ): TemplateResult {
+    const booleanFields = BOOLEAN_FIELDS.filter(({ field }) => field !== 'show_app_buttons' || controlsProfile === 'webos');
+    const showWebOSApps = controlsProfile === 'webos' && this._booleanValue(source, 'show_app_buttons');
+
     return html`
       <div class="option-group">
         <h4>Controls</h4>
         <div class="toggles">
-          ${BOOLEAN_FIELDS.map(
+          ${booleanFields.map(
             ({ field, label }) => html`
               <label class="toggle">
                 <input
@@ -207,11 +237,77 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
         </div>
       </div>
 
+      ${showWebOSApps ? this._renderWebOSApps(source, wsUrl, (apps) => update('webos_apps', apps)) : null}
+
       <div class="option-group">
         <h4>Gestures</h4>
         <div class="fields">
           ${NUMBER_FIELDS.map(({ field, label, step }) =>
             this._renderNumberField(label, this._numberValue(source, field), NUMBER_DEFAULTS[field], step, (value) => update(field, value))
+          )}
+        </div>
+      </div>
+    `;
+  }
+
+  private _renderWebOSApps(source: TouchpadOptionConfig, wsUrl: string, update: (apps: WebOSAppConfig[]) => void): TemplateResult {
+    const apps = this._webOSAppsValue(source);
+    const sourceKey = this._tvAppSourceKey(wsUrl);
+    const picker = this._tvAppPicker.sourceKey === sourceKey ? this._tvAppPicker : { apps: [], loading: false };
+    const existingIds = new Set(apps.map((app) => app.app_id));
+    const tvApps = picker.apps.filter((app) => !existingIds.has(app.app_id));
+    const pickerMessage = picker.message ?? (picker.apps.length > 0 && tvApps.length === 0 ? 'All TV apps are already in the list.' : undefined);
+    return html`
+      <div class="option-group">
+        <div class="option-header">
+          <h4>webOS apps</h4>
+          <div class="button-row">
+            <button class="secondary" type="button" @click=${() => update([...apps, { name: 'App', app_id: '', icon: 'mdi:apps' }])}>
+              Add app
+            </button>
+            <button
+              class="secondary"
+              type="button"
+              ?disabled=${!String(wsUrl).trim() || picker.loading}
+              @click=${() => this._loadAppsFromTV(wsUrl)}
+            >
+              ${picker.loading ? 'Loading...' : 'Add from TV'}
+            </button>
+          </div>
+        </div>
+        ${pickerMessage ? html`<div class="app-picker-message">${pickerMessage}</div>` : null}
+        ${tvApps.length > 0
+          ? html`<div class="tv-app-picker">
+              ${tvApps.map(
+                (app) => html`<button class="tv-app-option" type="button" @click=${() => update([...apps, app])}>
+                  ${app.icon ? html`<ha-icon icon=${app.icon}></ha-icon>` : null}
+                  <span>${app.name}</span>
+                </button>`
+              )}
+            </div>`
+          : null}
+        <div class="app-list">
+          ${apps.map(
+            (app, index) => html`
+              <div class="app-row">
+                <div class="app-main-fields">
+                  ${this._renderTextField('Name', app.name ?? '', 'Netflix', (value) =>
+                    this._updateWebOSApp(apps, index, 'name', value, update)
+                  )}
+                  ${this._renderTextField('App ID', app.app_id ?? '', 'netflix', (value) =>
+                    this._updateWebOSApp(apps, index, 'app_id', value, update)
+                  )}
+                </div>
+                <div class="app-action-fields">
+                  ${this._renderIconField('Icon', app.icon ?? '', 'compact', (value) =>
+                    this._updateWebOSApp(apps, index, 'icon', value || undefined, update)
+                  )}
+                  <button class="danger remove-app" type="button" @click=${() => update(apps.filter((_, appIndex) => appIndex !== index))}>
+                    Remove
+                  </button>
+                </div>
+              </div>
+            `
           )}
         </div>
       </div>
@@ -225,6 +321,118 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
         <input type="text" .value=${value} placeholder=${placeholder} @input=${(ev: Event) => update((ev.target as HTMLInputElement).value)} />
       </label>
     `;
+  }
+
+  private _renderIconField(label: string, value: string, variant: 'default' | 'compact', update: (value: string) => void): TemplateResult {
+    if (customElements.get('ha-icon-picker')) {
+      return html`
+        <label class="field icon-picker-field ${variant}">
+          <span>${label}</span>
+          <ha-icon-picker
+            .hass=${this.hass}
+            .label=${label}
+            .value=${value}
+            @value-changed=${(ev: CustomEvent<{ value?: string }>) => update(ev.detail?.value || '')}
+          ></ha-icon-picker>
+        </label>
+      `;
+    }
+
+    return this._renderTextField(label, value, 'mdi:apps', update);
+  }
+
+  private _tvAppSourceKey(wsUrl: string): string {
+    return String(wsUrl ?? '').trim();
+  }
+
+  private _loadAppsFromTV(wsUrl: string): void {
+    const url = String(wsUrl ?? '').trim();
+    const sourceKey = this._tvAppSourceKey(url);
+    if (!url) {
+      this._tvAppPicker = { apps: [], loading: false, sourceKey, message: 'Set a WebSocket URL first.' };
+      return;
+    }
+
+    const token = ++this._tvAppRequestToken;
+    this._tvAppPicker = { apps: [], loading: true, sourceKey };
+
+    let socket: WebSocket | undefined;
+    let settled = false;
+    let timeoutId: number | undefined;
+
+    const finish = (next: TVAppPickerState) => {
+      if (settled || token !== this._tvAppRequestToken) return;
+      settled = true;
+      if (timeoutId !== undefined) {
+        clearTimeout(timeoutId);
+      }
+      if (socket && socket.readyState !== WebSocket.CLOSED) {
+        socket.close();
+      }
+      this._tvAppPicker = next;
+    };
+
+    try {
+      socket = new WebSocket(url);
+    } catch (err) {
+      this._tvAppPicker = { apps: [], loading: false, sourceKey, message: 'Could not open the WebSocket URL.' };
+      return;
+    }
+
+    timeoutId = window.setTimeout(() => {
+      finish({ apps: [], loading: false, sourceKey, message: 'TV did not return an app list. Add apps manually.' });
+    }, 8000);
+
+    socket.addEventListener('open', () => {
+      try {
+        socket?.send(JSON.stringify({ t: 'list_apps' }));
+      } catch (err) {
+        finish({ apps: [], loading: false, sourceKey, message: 'Could not ask the bridge for apps.' });
+      }
+    });
+
+    socket.addEventListener('message', (event) => {
+      let data: TouchpadServerMessage;
+      try {
+        data = JSON.parse(String(event.data)) as TouchpadServerMessage;
+      } catch {
+        return;
+      }
+
+      if (data.t !== 'webos_app_list') {
+        return;
+      }
+
+      const apps = this._normalizeTVApps(data.apps);
+      const message = apps.length > 0 ? undefined : data.message ?? 'TV did not provide an app list. Add apps manually.';
+      finish({ apps, loading: false, sourceKey, message });
+    });
+
+    socket.addEventListener('error', () => {
+      finish({ apps: [], loading: false, sourceKey, message: 'Could not read apps from TV. Add apps manually.' });
+    });
+  }
+
+  private _normalizeTVApps(apps: WebOSAppConfig[] | undefined): WebOSAppConfig[] {
+    if (!Array.isArray(apps)) {
+      return [];
+    }
+
+    const seen = new Set<string>();
+    return apps
+      .map((app) => {
+        const name = String(app?.name ?? '').trim();
+        const appId = String(app?.app_id ?? '').trim();
+        const icon = String(app?.icon ?? '').trim() || defaultWebOSAppIcon(name, appId);
+        return { name: name || appId, app_id: appId, icon };
+      })
+      .filter((app) => {
+        if (!app.name || !app.app_id || seen.has(app.app_id)) {
+          return false;
+        }
+        seen.add(app.app_id);
+        return true;
+      });
   }
 
   private _renderNumberField(
@@ -292,6 +500,39 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
 
   private _booleanValue(source: TouchpadOptionConfig, field: BooleanOptionField): boolean {
     return source[field] ?? this._config?.[field] ?? BOOLEAN_DEFAULTS[field];
+  }
+
+  private _webOSAppsValue(source: TouchpadOptionConfig): WebOSAppConfig[] {
+    const apps = source.webos_apps ?? this._config?.webos_apps ?? DEFAULT_WEBOS_APPS;
+    if (!Array.isArray(apps)) {
+      return [];
+    }
+    return apps.map((app) => ({
+      name: String(app?.name ?? ''),
+      app_id: String(app?.app_id ?? ''),
+      icon: app?.icon ? String(app.icon) : undefined,
+    }));
+  }
+
+  private _updateWebOSApp(
+    apps: WebOSAppConfig[],
+    index: number,
+    field: keyof WebOSAppConfig,
+    value: string | undefined,
+    update: (apps: WebOSAppConfig[]) => void
+  ): void {
+    const cleanValue = typeof value === 'string' && (field === 'app_id' || field === 'icon') ? value.trim() : value;
+    const next = apps.map((app, appIndex) => {
+      if (appIndex !== index) return app;
+      const nextApp = { ...app };
+      if (cleanValue === undefined) {
+        delete nextApp[field];
+      } else {
+        nextApp[field] = cleanValue;
+      }
+      return nextApp;
+    });
+    update(next);
   }
 
   private _numberValue(source: TouchpadOptionConfig, field: NumberOptionField): number | undefined {
@@ -408,7 +649,9 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
       show_status_text: device.show_status_text,
       show_audio_controls: device.show_audio_controls,
       show_keyboard_button: device.show_keyboard_button,
+      show_app_buttons: device.show_app_buttons,
       auto_focus_keyboard: device.auto_focus_keyboard,
+      webos_apps: device.webos_apps,
       invert_scroll: device.invert_scroll,
       sensitivity: device.sensitivity,
       scroll_multiplier: device.scroll_multiplier,
@@ -455,6 +698,7 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
       show_status_text: BOOLEAN_DEFAULTS.show_status_text,
       show_audio_controls: BOOLEAN_DEFAULTS.show_audio_controls,
       show_keyboard_button: BOOLEAN_DEFAULTS.show_keyboard_button,
+      show_app_buttons: BOOLEAN_DEFAULTS.show_app_buttons,
       auto_focus_keyboard: BOOLEAN_DEFAULTS.auto_focus_keyboard,
       invert_scroll: BOOLEAN_DEFAULTS.invert_scroll,
     };
@@ -466,7 +710,9 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
     target.show_status_text = source.show_status_text ?? BOOLEAN_DEFAULTS.show_status_text;
     target.show_audio_controls = source.show_audio_controls ?? BOOLEAN_DEFAULTS.show_audio_controls;
     target.show_keyboard_button = source.show_keyboard_button ?? BOOLEAN_DEFAULTS.show_keyboard_button;
+    target.show_app_buttons = source.show_app_buttons ?? BOOLEAN_DEFAULTS.show_app_buttons;
     target.auto_focus_keyboard = source.auto_focus_keyboard ?? BOOLEAN_DEFAULTS.auto_focus_keyboard;
+    target.webos_apps = source.webos_apps?.map((app) => ({ ...app }));
     target.invert_scroll = source.invert_scroll ?? BOOLEAN_DEFAULTS.invert_scroll;
     target.sensitivity = source.sensitivity;
     target.scroll_multiplier = source.scroll_multiplier;
@@ -644,10 +890,16 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
 
     input[type='text'],
     input[type='number'],
-    select {
+    select,
+    ha-icon-picker {
       box-sizing: border-box;
       width: 100%;
       min-width: 0;
+    }
+
+    input[type='text'],
+    input[type='number'],
+    select {
       height: 40px;
       padding: 0 10px;
       border: 1px solid var(--divider-color, rgba(127, 127, 127, 0.35));
@@ -664,11 +916,33 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
       outline: none;
     }
 
+    .icon-picker-field {
+      min-width: 0;
+    }
+
+    .icon-picker-field.compact ha-icon-picker {
+      --mdc-shape-small: 6px;
+    }
+
     .option-group {
       display: flex;
       flex-direction: column;
       gap: 10px;
       padding-top: 2px;
+    }
+
+    .option-header {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .button-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      justify-content: flex-end;
     }
 
     .toggles {
@@ -689,6 +963,94 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
 
     .toggle input {
       flex: 0 0 auto;
+    }
+
+    .app-list {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .app-picker-message {
+      padding: 8px 10px;
+      border-radius: 6px;
+      background: rgba(127, 127, 127, 0.12);
+      color: var(--secondary-text-color);
+      font-size: 13px;
+      line-height: 1.35;
+    }
+
+    .tv-app-picker {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      max-height: 160px;
+      overflow-y: auto;
+      padding: 2px;
+    }
+
+    .tv-app-option {
+      max-width: 220px;
+      display: inline-flex;
+      gap: 8px;
+      align-items: center;
+      padding: 0 12px;
+    }
+
+    .tv-app-option ha-icon {
+      flex: 0 0 auto;
+      width: 18px;
+      height: 18px;
+      --mdc-icon-size: 18px;
+    }
+
+    .tv-app-option span {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .app-row {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      min-width: 0;
+      padding: 10px;
+      border: 1px solid var(--divider-color, rgba(127, 127, 127, 0.28));
+      border-radius: 8px;
+      background: rgba(127, 127, 127, 0.04);
+    }
+
+    .app-main-fields,
+    .app-action-fields {
+      display: grid;
+      gap: 10px 12px;
+      min-width: 0;
+      align-items: end;
+    }
+
+    .app-main-fields {
+      grid-template-columns: minmax(130px, 0.85fr) minmax(180px, 1.15fr);
+    }
+
+    .app-action-fields {
+      grid-template-columns: minmax(220px, 1fr) 92px;
+    }
+
+    .remove-app {
+      width: 92px;
+      min-width: 0;
+    }
+
+    @media (max-width: 700px) {
+      .app-main-fields,
+      .app-action-fields {
+        grid-template-columns: 1fr;
+      }
+
+      .remove-app {
+        width: 100%;
+      }
     }
 
     .tabs {

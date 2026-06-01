@@ -8,9 +8,9 @@ This opens a local WebSocket server that accepts the same messages as the
 touchpad card (move/scroll/click) and forwards them to the TV's pointer socket.
 
 Usage (example):
-    python backend/webos_pointer_bridge.py --tv-host 192.168.0.6 --listen-port 8777 --use-ssl --tv-port 3001 --origin --client-key-file backend/webos_client_key_sypialnia.json
+    python addon/webos-pointer-bridge/webos_pointer_bridge.py --tv-host 192.168.0.50 --listen-port 8777 --use-ssl --tv-port 3001 --origin
 
-    python backend/webos_pointer_bridge.py --tv-host 192.168.0.129 --listen-port 8778 --use-ssl --tv-port 3001 --origin --client-key-file backend/webos_client_key_salon.json
+    python addon/webos-pointer-bridge/webos_pointer_bridge.py --tv-host 192.168.0.51 --listen-port 8778 --use-ssl --tv-port 3001 --origin --client-key-file addon/webos-pointer-bridge/webos_client_key_livingroom.json
 
 On first run the TV will prompt for pairing. The returned client-key is cached
 in webos_client_key.json next to this script.
@@ -32,6 +32,12 @@ from websockets.server import ServerConnection
 
 POINTER_URI = "ssap://com.webos.service.networkinput/getPointerInputSocket"
 IME_URI = "ssap://com.webos.service.ime/registerRemoteKeyboard"
+LAUNCH_URI = "ssap://system.launcher/launch"
+APP_STATUS_URI = "ssap://com.webos.applicationManager/getAppLoadStatus"
+APP_LIST_URIS = (
+    "ssap://com.webos.applicationManager/listApps",
+    "ssap://com.webos.applicationManager/listLaunchPoints",
+)
 # webOS pointer socket becomes non-linear with large deltas; keep packets small.
 MAX_POINTER_DELTA = 40
 MAX_POINTER_CHUNKS = 64
@@ -63,6 +69,7 @@ class WebOSPointerBridge:
         self.ime_ws: Optional[ClientConnection] = None
         self._ime_failed = False
         self._connect_lock = asyncio.Lock()
+        self._session_request_lock = asyncio.Lock()
         self._scroll_rem_x = 0.0
         self._scroll_rem_y = 0.0
 
@@ -110,10 +117,55 @@ class WebOSPointerBridge:
                     action = data.get("action")
                     if isinstance(action, str):
                         await self._send_volume(action)
+                elif msg_type == "query_apps":
+                    app_ids = data.get("app_ids")
+                    if isinstance(app_ids, list):
+                        await self._send_app_availability(ws, app_ids)
+                elif msg_type == "list_apps":
+                    await self._send_app_list(ws)
+                elif msg_type == "launch_app":
+                    app_id = data.get("app_id")
+                    if isinstance(app_id, str) and app_id.strip():
+                        if not await self._launch_app(app_id.strip()):
+                            await self._send_app_launch_result(ws, app_id.strip(), ok=False)
                 else:
                     logging.debug("Unsupported message type from client: %s", msg_type)
         except ConnectionClosed:
             logging.info("Client disconnected: %s", ws.remote_address)
+
+    async def _send_app_availability(self, ws: ServerConnection, app_ids: list[object]) -> None:
+        try:
+            requested = [app_id.strip() for app_id in app_ids if isinstance(app_id, str) and app_id.strip()]
+            available = await self._available_app_ids_for(requested)
+            await ws.send(json.dumps({"t": "webos_apps", "available_app_ids": sorted(available)}))
+        except Exception:
+            logging.debug("Could not read webOS app availability", exc_info=True)
+
+    async def _send_app_list(self, ws: ServerConnection) -> None:
+        try:
+            apps = await self._list_installed_apps()
+            await ws.send(json.dumps({"t": "webos_app_list", "ok": True, "apps": apps}))
+        except Exception:
+            logging.debug("Could not read installed webOS apps", exc_info=True)
+            try:
+                await ws.send(
+                    json.dumps(
+                        {
+                            "t": "webos_app_list",
+                            "ok": False,
+                            "apps": [],
+                            "message": "TV did not provide an app list",
+                        }
+                    )
+                )
+            except ConnectionClosed:
+                pass
+
+    async def _send_app_launch_result(self, ws: ServerConnection, app_id: str, ok: bool) -> None:
+        try:
+            await ws.send(json.dumps({"t": "app_launch_result", "app_id": app_id, "ok": ok}))
+        except ConnectionClosed:
+            pass
 
     async def _send_pointer(self, payload: str) -> None:
         await self.ensure_pointer()
@@ -181,19 +233,26 @@ class WebOSPointerBridge:
         safe = text.replace("\n", "\\n")
         await self._send_pointer(f"type:text\ntext:{safe}\n\n")
 
+    async def _session_request(self, request_id: str, uri: str, payload: dict | None = None) -> dict:
+        if not self.session_ws:
+            raise ConnectionError("webOS session not available")
+        async with self._session_request_lock:
+            msg = {"id": request_id, "type": "request", "uri": uri}
+            if payload is not None:
+                msg["payload"] = payload
+            await self.session_ws.send(json.dumps(msg))
+            while True:
+                resp_raw = await asyncio.wait_for(self.session_ws.recv(), timeout=8)
+                resp = json.loads(resp_raw)
+                if resp.get("id") == request_id:
+                    return resp
+                logging.debug("Ignoring unexpected webOS response while waiting for %s: %s", request_id, resp)
+
     async def _send_text_request(self, text: str) -> bool:
         if not self.session_ws:
             return False
         try:
-            msg = {
-                "id": "ime_insert",
-                "type": "request",
-                "uri": "ssap://com.webos.service.ime/insertText",
-                "payload": {"text": text},
-            }
-            await self.session_ws.send(json.dumps(msg))
-            resp_raw = await self.session_ws.recv()
-            resp = json.loads(resp_raw)
+            resp = await self._session_request("ime_insert", "ssap://com.webos.service.ime/insertText", {"text": text})
             if resp.get("type") == "response" and resp.get("payload", {}).get("returnValue"):
                 return True
         except Exception:
@@ -204,15 +263,7 @@ class WebOSPointerBridge:
         if not self.session_ws:
             return False
         try:
-            msg = {
-                "id": "ime_delete",
-                "type": "request",
-                "uri": "ssap://com.webos.service.ime/deleteCharacters",
-                "payload": {"count": count},
-            }
-            await self.session_ws.send(json.dumps(msg))
-            resp_raw = await self.session_ws.recv()
-            resp = json.loads(resp_raw)
+            resp = await self._session_request("ime_delete", "ssap://com.webos.service.ime/deleteCharacters", {"count": count})
             return bool(resp.get("type") == "response" and resp.get("payload", {}).get("returnValue"))
         except Exception:
             logging.debug("Direct IME deleteCharacters failed", exc_info=True)
@@ -274,6 +325,124 @@ class WebOSPointerBridge:
             logging.debug("Unsupported volume action for webOS: %s", action)
             return
         await self._send_button(name)
+
+    async def _available_app_ids_for(self, app_ids: list[str]) -> set[str]:
+        available: set[str] = set()
+        checked_count = 0
+        for app_id in app_ids:
+            try:
+                if await self._is_app_available(app_id):
+                    available.add(app_id)
+                checked_count += 1
+            except Exception:
+                logging.debug("App status request failed for %s", app_id, exc_info=True)
+
+        if checked_count > 0:
+            return available
+
+        installed = await self._list_installed_app_ids()
+        installed_lookup = {app_id.lower(): app_id for app_id in installed}
+        return {app_id for app_id in app_ids if app_id in installed or app_id.lower() in installed_lookup}
+
+    async def _is_app_available(self, app_id: str) -> bool:
+        await self.ensure_pointer()
+        if not self.session_ws:
+            raise ConnectionError("webOS session not available")
+        resp = await self._session_request("app_status", APP_STATUS_URI, {"appId": app_id})
+        payload = resp.get("payload", {})
+        if resp.get("type") == "error" or payload.get("returnValue") is False:
+            raise RuntimeError(f"getAppLoadStatus failed: {resp}")
+        return bool(payload.get("exist", payload.get("appExists", payload.get("exists", payload.get("loadStatus") == "loaded"))))
+
+    async def _list_installed_app_ids(self) -> set[str]:
+        await self.ensure_pointer()
+        if not self.session_ws:
+            raise ConnectionError("webOS session not available")
+        last_error: Exception | None = None
+        for uri in APP_LIST_URIS:
+            try:
+                return await self._request_app_ids(uri)
+            except Exception as err:
+                last_error = err
+                logging.debug("App list request failed for %s", uri, exc_info=True)
+        raise RuntimeError("No webOS app list endpoint succeeded") from last_error
+
+    async def _list_installed_apps(self) -> list[dict[str, str]]:
+        await self.ensure_pointer()
+        if not self.session_ws:
+            raise ConnectionError("webOS session not available")
+        last_error: Exception | None = None
+        for uri in APP_LIST_URIS:
+            try:
+                apps = await self._request_apps(uri)
+                if apps:
+                    return apps
+            except Exception as err:
+                last_error = err
+                logging.debug("App list request failed for %s", uri, exc_info=True)
+        raise RuntimeError("No webOS app list endpoint succeeded") from last_error
+
+    async def _request_app_ids(self, uri: str) -> set[str]:
+        apps = await self._request_apps(uri)
+        return {app["app_id"] for app in apps}
+
+    async def _request_apps(self, uri: str) -> list[dict[str, str]]:
+        if not self.session_ws:
+            raise ConnectionError("webOS session not available")
+        resp = await self._session_request("list_apps", uri)
+        payload = resp.get("payload", {})
+        if resp.get("type") == "error" or payload.get("returnValue") is False:
+            raise RuntimeError(f"App list request failed: {resp}")
+        app_items = payload.get("apps") or payload.get("launchPoints") or payload.get("applications") or []
+        apps: list[dict[str, str]] = []
+        seen: set[str] = set()
+        if isinstance(app_items, list):
+            for app in app_items:
+                if not isinstance(app, dict):
+                    continue
+                normalized = self._normalize_app_item(app)
+                if not normalized:
+                    continue
+                app_id = normalized["app_id"]
+                if app_id in seen:
+                    continue
+                seen.add(app_id)
+                apps.append(normalized)
+        apps.sort(key=lambda item: item["name"].casefold())
+        return apps
+
+    def _normalize_app_item(self, app: dict) -> dict[str, str] | None:
+        app_id = app.get("id") or app.get("appId") or app.get("launchPointId")
+        if not isinstance(app_id, str) or not app_id.strip():
+            return None
+
+        app_id = app_id.strip()
+        name = (
+            app.get("title")
+            or app.get("name")
+            or app.get("appName")
+            or app.get("label")
+            or app.get("defaultWindowType")
+            or app_id
+        )
+        if not isinstance(name, str):
+            name = app_id
+        return {"name": name.strip() or app_id, "app_id": app_id}
+
+    async def _launch_app(self, app_id: str) -> bool:
+        await self.ensure_pointer()
+        if not self.session_ws:
+            raise ConnectionError("webOS session not available")
+        try:
+            resp = await self._session_request("launch_app", LAUNCH_URI, {"id": app_id})
+            if not resp.get("payload", {}).get("returnValue"):
+                logging.warning("TV did not confirm app launch for %s: %s", app_id, resp)
+                return False
+            return True
+        except Exception:
+            logging.exception("Failed to launch webOS app: %s", app_id)
+            await self._teardown_pointer()
+            return False
 
     async def ensure_pointer(self) -> None:
         async with self._connect_lock:

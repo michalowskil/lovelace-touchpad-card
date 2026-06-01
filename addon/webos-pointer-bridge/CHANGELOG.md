@@ -1,5 +1,10 @@
 # webOS Pointer Bridge Changelog
 
+## 0.4.0
+- Added support for launching webOS apps from touchpad-card app buttons.
+- Report installed webOS app IDs and failed app launches back to the card.
+- Added a normalized installed-app list response for the card editor's "Add from TV" picker.
+
 ## 0.3.2
 - Use the current multi-arch Home Assistant base image so local add-on builds work on aarch64.
 - Remove deprecated add-on architecture entries.

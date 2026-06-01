@@ -7,9 +7,12 @@ import {
   TouchpadControlsProfile,
   TouchpadDeviceConfig,
   TouchpadMessage,
+  TouchpadServerMessage,
   TouchpadThemeMode,
   VolumeAction,
+  WebOSAppConfig,
 } from './types';
+import { DEFAULT_WEBOS_APPS, normalizeWebOSApps } from './webos-apps';
 import './touchpad-card-editor';
 
 type PointerGesture = 'move' | 'scroll' | null;
@@ -48,7 +51,9 @@ interface TouchpadRuntimeOptions {
   showStatusText: boolean;
   showAudioControls: boolean;
   showKeyboardButton: boolean;
+  showAppButtons: boolean;
   autoFocusKeyboard: boolean;
+  webosApps: WebOSAppConfig[];
 }
 
 interface PersistedDeviceUiState {
@@ -108,6 +113,7 @@ const DEFAULTS = {
   showStatusText: true,
   showAudioControls: true,
   showKeyboardButton: true,
+  showAppButtons: false,
   autoFocusKeyboard: true,
 };
 
@@ -125,11 +131,15 @@ export class TouchpadCard extends LitElement {
   @state() private _locked = false;
   @state() private _speedMultiplier: 1 | 2 | 3 | 4 = 1;
   @state() private _keyboardOpen = false;
+  @state() private _availableAppIds?: Set<string>;
+  @state() private _unavailableAppIds = new Set<string>();
+  @state() private _appNotice?: string;
 
   private socket?: WebSocket;
   private reconnectTimer?: number;
   private rafHandle?: number;
   private statusTimer?: number;
+  private appNoticeTimer?: number;
   private detachTimer?: number;
   private wsErrorNotified = false;
   private reconnectDelayMs = RECONNECT_BASE_MS;
@@ -158,7 +168,9 @@ export class TouchpadCard extends LitElement {
     showStatusText: DEFAULTS.showStatusText,
     showAudioControls: DEFAULTS.showAudioControls,
     showKeyboardButton: DEFAULTS.showKeyboardButton,
+    showAppButtons: DEFAULTS.showAppButtons,
     autoFocusKeyboard: DEFAULTS.autoFocusKeyboard,
+    webosApps: DEFAULT_WEBOS_APPS,
   };
 
   public static async getConfigElement(): Promise<LovelaceCardEditor> {
@@ -177,6 +189,7 @@ export class TouchpadCard extends LitElement {
       show_status_text: DEFAULTS.showStatusText,
       show_audio_controls: DEFAULTS.showAudioControls,
       show_keyboard_button: DEFAULTS.showKeyboardButton,
+      show_app_buttons: DEFAULTS.showAppButtons,
       auto_focus_keyboard: DEFAULTS.autoFocusKeyboard,
     };
   }
@@ -219,6 +232,10 @@ export class TouchpadCard extends LitElement {
       clearTimeout(this.statusTimer);
       this.statusTimer = undefined;
     }
+    if (this.appNoticeTimer) {
+      clearTimeout(this.appNoticeTimer);
+      this.appNoticeTimer = undefined;
+    }
     if (this.holdTimer) {
       clearTimeout(this.holdTimer);
       this.holdTimer = undefined;
@@ -233,6 +250,7 @@ export class TouchpadCard extends LitElement {
     // Delay teardown slightly to avoid churn when HA re-parents the card in the DOM.
     this.detachTimer = window.setTimeout(() => {
       this.teardownSocket();
+      this.resetAppAvailability();
       this.detachTimer = undefined;
     }, 2000);
   }
@@ -258,6 +276,7 @@ export class TouchpadCard extends LitElement {
   }
 
   private resolveOptions(config: TouchpadCardConfig, device?: TouchpadDeviceConfig): TouchpadRuntimeOptions {
+    const webosApps = device?.webos_apps ?? config.webos_apps;
     return {
       themeMode: this.normalizeThemeMode(config.theme_mode),
       controlsProfile: this.normalizeControlsProfile(this.configuredControlsProfile(device ?? config) ?? this.configuredControlsProfile(config)),
@@ -271,7 +290,9 @@ export class TouchpadCard extends LitElement {
       showStatusText: device?.show_status_text ?? config.show_status_text ?? DEFAULTS.showStatusText,
       showAudioControls: device?.show_audio_controls ?? config.show_audio_controls ?? DEFAULTS.showAudioControls,
       showKeyboardButton: device?.show_keyboard_button ?? config.show_keyboard_button ?? DEFAULTS.showKeyboardButton,
+      showAppButtons: device?.show_app_buttons ?? config.show_app_buttons ?? DEFAULTS.showAppButtons,
       autoFocusKeyboard: device?.auto_focus_keyboard ?? config.auto_focus_keyboard ?? DEFAULTS.autoFocusKeyboard,
+      webosApps: normalizeWebOSApps(webosApps ?? DEFAULT_WEBOS_APPS),
     };
   }
 
@@ -327,7 +348,9 @@ export class TouchpadCard extends LitElement {
         show_status_text: config.show_status_text,
         show_audio_controls: config.show_audio_controls,
         show_keyboard_button: config.show_keyboard_button,
+        show_app_buttons: config.show_app_buttons,
         auto_focus_keyboard: config.auto_focus_keyboard,
+        webos_apps: config.webos_apps,
       },
     ];
   }
@@ -383,7 +406,13 @@ export class TouchpadCard extends LitElement {
       this.wsErrorNotified = false;
       this.reconnectDelayMs = RECONNECT_BASE_MS;
       this.setStatus('connected');
+      this.queryAppAvailability();
       this.requestUpdate();
+    });
+
+    this.socket.addEventListener('message', (event) => {
+      if (generation !== this.socketGeneration) return;
+      this.handleServerMessage(event.data);
     });
 
     this.socket.addEventListener('close', () => {
@@ -416,6 +445,68 @@ export class TouchpadCard extends LitElement {
       this.connect();
     }, delay);
     this.reconnectDelayMs = Math.min(Math.round(this.reconnectDelayMs * 1.8), RECONNECT_MAX_MS);
+  }
+
+  private handleServerMessage(raw: unknown): void {
+    if (typeof raw !== 'string') {
+      return;
+    }
+
+    let data: TouchpadServerMessage;
+    try {
+      data = JSON.parse(raw) as TouchpadServerMessage;
+    } catch (err) {
+      logCardWarn('Ignoring invalid server message.', err);
+      return;
+    }
+
+    if (data.t === 'webos_apps') {
+      if (!Array.isArray(data.available_app_ids)) return;
+      this._availableAppIds = new Set(data.available_app_ids.map((appId) => String(appId).trim()).filter(Boolean));
+      this.requestUpdate();
+      return;
+    }
+
+    if (data.t === 'app_launch_result' && data.ok === false) {
+      const appId = String(data.app_id ?? '').trim();
+      if (appId) {
+        this._unavailableAppIds = new Set([...this._unavailableAppIds, appId]);
+      }
+      const appName = (this.appNameForId(appId) ?? appId) || 'App';
+      this.showAppNotice(`${appName} not available on this TV`);
+    }
+  }
+
+  private resetAppAvailability(): void {
+    this._availableAppIds = undefined;
+    this._unavailableAppIds = new Set<string>();
+    this._appNotice = undefined;
+    if (this.appNoticeTimer) {
+      clearTimeout(this.appNoticeTimer);
+      this.appNoticeTimer = undefined;
+    }
+  }
+
+  private appNameForId(appId: string): string | undefined {
+    const app = this.opts.webosApps.find((candidate) => candidate.app_id === appId);
+    return app ? this.appDisplayLabel(app) : undefined;
+  }
+
+  private isAppUnavailable(appId: string): boolean {
+    if (!appId) return true;
+    if (this._unavailableAppIds.has(appId)) return true;
+    return this._availableAppIds !== undefined && !this._availableAppIds.has(appId);
+  }
+
+  private showAppNotice(message: string): void {
+    if (this.appNoticeTimer) {
+      clearTimeout(this.appNoticeTimer);
+    }
+    this._appNotice = message;
+    this.appNoticeTimer = window.setTimeout(() => {
+      this._appNotice = undefined;
+      this.appNoticeTimer = undefined;
+    }, 3200);
   }
 
   private teardownSocket(invalidate = true): void {
@@ -935,6 +1026,40 @@ export class TouchpadCard extends LitElement {
     }
   }
 
+  private launchApp(app: WebOSAppConfig): void {
+    const appId = app.app_id;
+    const label = this.appDisplayLabel(app);
+    if (this.isAppUnavailable(appId)) {
+      this.showAppNotice(`${label} not available on this TV`);
+      return;
+    }
+    if (!this.socket || this.socket.readyState !== WebSocket.OPEN) return;
+    if (!appId) return;
+    const msg: TouchpadMessage = { t: 'launch_app', app_id: appId };
+    try {
+      this.socket.send(JSON.stringify(msg));
+    } catch (err) {
+      logCardError('Failed to launch webOS app.', err);
+    }
+  }
+
+  private appDisplayLabel(app: WebOSAppConfig): string {
+    return String(app.name ?? '').trim() || String(app.app_id ?? '').trim() || 'App';
+  }
+
+  private queryAppAvailability(): void {
+    if (!this.socket || this.socket.readyState !== WebSocket.OPEN) return;
+    if (this.opts.controlsProfile !== 'webos' || !this.opts.showAppButtons) return;
+    const appIds = this.opts.webosApps.map((app) => app.app_id).filter(Boolean);
+    if (!appIds.length) return;
+    const msg: TouchpadMessage = { t: 'query_apps', app_ids: appIds };
+    try {
+      this.socket.send(JSON.stringify(msg));
+    } catch (err) {
+      logCardWarn('Failed to query webOS app availability.', err);
+    }
+  }
+
   private handleKeyboardInput = (ev: InputEvent): void => {
     const target = ev.target as HTMLInputElement;
     const inputType = ev.inputType;
@@ -1058,6 +1183,7 @@ export class TouchpadCard extends LitElement {
 
     this.persistUiState();
     this.resetInteractionState();
+    this.resetAppAvailability();
     this._activeDeviceId = id;
     this.applyActiveDeviceOptions();
     this.restoreDeviceUiState();
@@ -1116,6 +1242,7 @@ export class TouchpadCard extends LitElement {
     const showKeyboardSection = this.opts.showKeyboardButton && this._keyboardOpen;
     const showDeviceTabs = this._devices.length > 1;
     const isWebos = this.opts.controlsProfile === 'webos';
+    const showAppLauncher = isWebos && this.opts.showAppButtons && this.opts.webosApps.length > 0;
     const themeClass = `theme-${this.effectiveThemeMode()}`;
     const keyboardPlaceholder = isWebos ? 'Tap to type on TV' : 'Tap to type on PC';
     const leftButtons = isWebos
@@ -1165,7 +1292,7 @@ export class TouchpadCard extends LitElement {
         <div
           class="surface ${this._locked ? 'locked' : ''} ${showKeyboardSection ? 'with-keyboard' : ''} ${showDeviceTabs
             ? 'with-device-tabs'
-            : ''}"
+            : ''} ${showKeyboardSection || showAppLauncher ? 'with-bottom-panel' : ''}"
         >
           ${this.opts.showSpeedButtons
             ? html`<div class="speed-buttons">
@@ -1230,6 +1357,30 @@ export class TouchpadCard extends LitElement {
               </div>`
             : nothing}
         </div>
+        ${showAppLauncher
+          ? html`<div class="app-strip ${showKeyboardSection ? 'with-keyboard' : ''}">
+              ${this.opts.webosApps.map(
+                (app) => {
+                  const unavailable = this.isAppUnavailable(app.app_id);
+                  const name = String(app.name ?? '').trim();
+                  const icon = String(app.icon ?? '').trim();
+                  const label = this.appDisplayLabel(app);
+                  const iconOnly = Boolean(icon && !name);
+                  return html`<button
+                    class="app-btn ${iconOnly ? 'icon-only' : ''} ${unavailable ? 'unavailable' : ''}"
+                    title=${unavailable ? `${label} not available on this TV` : label}
+                    aria-label=${label}
+                    aria-disabled=${unavailable ? 'true' : 'false'}
+                    @click=${() => this.launchApp(app)}
+                  >
+                    ${icon ? html`<ha-icon icon=${icon}></ha-icon>` : nothing}
+                    ${name ? html`<span>${name}</span>` : nothing}
+                  </button>`;
+                }
+              )}
+              ${this._appNotice ? html`<div class="app-notice">${this._appNotice}</div>` : nothing}
+            </div>`
+          : nothing}
         ${showKeyboardSection
           ? html`<div class="controls">
                   <div class="left-panel">
@@ -1394,7 +1545,8 @@ export class TouchpadCard extends LitElement {
       border-top-right-radius: 0;
     }
 
-    .surface.with-keyboard {
+    .surface.with-keyboard,
+    .surface.with-bottom-panel {
       border-bottom-left-radius: 0;
       border-bottom-right-radius: 0;
     }
@@ -1549,6 +1701,91 @@ export class TouchpadCard extends LitElement {
       justify-content: center;
       color: inherit;
       --mdc-icon-size: 20px;
+    }
+    .app-strip {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      padding: 10px 14px;
+      overflow: visible;
+      background: var(--tp-panel-bg);
+      border-top: 1px solid var(--tp-divider);
+      border-bottom-left-radius: 12px;
+      border-bottom-right-radius: 12px;
+    }
+    .app-strip.with-keyboard {
+      border-bottom-left-radius: 0;
+      border-bottom-right-radius: 0;
+    }
+    .app-btn {
+      flex: 0 1 auto;
+      max-width: min(160px, 100%);
+      height: var(--control-height);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      padding: 0 12px;
+      box-sizing: border-box;
+      border-radius: 10px;
+      border: 1px solid var(--tp-border-subtle);
+      background: var(--tp-control-bg-strong);
+      color: var(--tp-strong-text);
+      cursor: pointer;
+      font-size: 13px;
+      transition: all 140ms ease;
+    }
+    .app-btn:hover {
+      border-color: var(--tp-border-strong);
+      background: var(--tp-control-hover-bg);
+    }
+    .app-btn.icon-only {
+      width: var(--control-height);
+      min-width: var(--control-height);
+      padding: 0;
+    }
+    .app-btn.unavailable {
+      opacity: 0.42;
+      filter: grayscale(1);
+      cursor: not-allowed;
+    }
+    .app-btn.unavailable:hover {
+      border-color: var(--tp-border-subtle);
+      background: var(--tp-control-bg-strong);
+    }
+    .app-btn:active {
+      transform: scale(0.98);
+    }
+    .app-btn.unavailable:active {
+      transform: none;
+    }
+    .app-btn ha-icon {
+      flex: 0 0 auto;
+      width: 18px;
+      height: 18px;
+      --mdc-icon-size: 18px;
+    }
+    .app-btn span {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .app-notice {
+      flex: 0 1 auto;
+      max-width: 100%;
+      min-height: var(--control-height);
+      display: inline-flex;
+      align-items: center;
+      padding: 0 12px;
+      box-sizing: border-box;
+      border-radius: 10px;
+      border: 1px solid var(--tp-accent-border);
+      background: var(--tp-accent-bg);
+      color: var(--tp-accent-soft);
+      font-size: 13px;
+      white-space: normal;
     }
     .controls {
       display: flex;

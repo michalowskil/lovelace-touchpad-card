@@ -1,14 +1,8 @@
 import asyncio
 import json
 import logging
-import sys
 from pathlib import Path
 from typing import Any, Dict, List
-
-ROOT = Path(__file__).resolve().parents[2]
-BACKEND_DIR = ROOT / "backend"
-if BACKEND_DIR.exists():
-    sys.path.insert(0, str(BACKEND_DIR))
 
 from webos_pointer_bridge import WebOSPointerBridge
 

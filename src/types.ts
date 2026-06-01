@@ -3,6 +3,12 @@ import { LovelaceCardConfig } from 'custom-card-helpers';
 export type TouchpadControlsProfile = 'pc' | 'webos';
 export type TouchpadThemeMode = 'auto' | 'dark' | 'light';
 
+export interface WebOSAppConfig {
+  name?: string;
+  app_id: string;
+  icon?: string;
+}
+
 export interface TouchpadEndpointConfig {
   wsUrl?: string;
   controls_profile?: TouchpadControlsProfile;
@@ -16,7 +22,9 @@ export interface TouchpadOptionConfig {
   show_status_text?: boolean;
   show_audio_controls?: boolean;
   show_keyboard_button?: boolean;
+  show_app_buttons?: boolean;
   auto_focus_keyboard?: boolean;
+  webos_apps?: WebOSAppConfig[];
   sensitivity?: number;
   scroll_multiplier?: number;
   invert_scroll?: boolean;
@@ -68,4 +76,12 @@ export type TouchpadMessage =
   | { t: 'up' }
   | { t: 'text'; text: string }
   | { t: 'key'; key: KeyCommand }
-  | { t: 'volume'; action: VolumeAction };
+  | { t: 'volume'; action: VolumeAction }
+  | { t: 'query_apps'; app_ids: string[] }
+  | { t: 'list_apps' }
+  | { t: 'launch_app'; app_id: string };
+
+export type TouchpadServerMessage =
+  | { t: 'webos_apps'; available_app_ids: string[] }
+  | { t: 'webos_app_list'; apps: WebOSAppConfig[]; ok?: boolean; message?: string }
+  | { t: 'app_launch_result'; app_id: string; ok: boolean; message?: string };
