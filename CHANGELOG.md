@@ -1,6 +1,7 @@
 # Card Changelog
 
 ## 0.9.0
+- Added a configurable Gesture mode button with swipe, tap, and hold actions for PC and LG webOS controls.
 - Added a remembered webOS app toggle button that shows or hides configured app shortcuts.
 
 ## 0.8.0

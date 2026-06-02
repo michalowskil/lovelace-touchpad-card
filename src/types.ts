@@ -9,6 +9,40 @@ export interface WebOSAppConfig {
   icon?: string;
 }
 
+export type TouchpadGestureAction =
+  | 'none'
+  | 'enter'
+  | 'backspace'
+  | 'escape'
+  | 'back'
+  | 'tab'
+  | 'space'
+  | 'delete'
+  | 'arrow_left'
+  | 'arrow_right'
+  | 'arrow_up'
+  | 'arrow_down'
+  | 'home'
+  | 'end'
+  | 'page_up'
+  | 'page_down'
+  | 'power'
+  | 'settings'
+  | 'volume_up'
+  | 'volume_down'
+  | 'volume_mute';
+
+export interface TouchpadGestureModeConfig {
+  show_button?: boolean;
+  invert_swipes?: boolean;
+  swipe_left?: TouchpadGestureAction;
+  swipe_right?: TouchpadGestureAction;
+  swipe_up?: TouchpadGestureAction;
+  swipe_down?: TouchpadGestureAction;
+  tap?: TouchpadGestureAction;
+  hold?: TouchpadGestureAction;
+}
+
 export interface TouchpadEndpointConfig {
   wsUrl?: string;
   controls_profile?: TouchpadControlsProfile;
@@ -26,6 +60,7 @@ export interface TouchpadOptionConfig {
   show_app_buttons?: boolean;
   auto_focus_keyboard?: boolean;
   webos_apps?: WebOSAppConfig[];
+  gesture_mode?: TouchpadGestureModeConfig;
   sensitivity?: number;
   scroll_multiplier?: number;
   invert_scroll?: boolean;

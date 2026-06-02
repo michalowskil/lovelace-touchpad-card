@@ -6,6 +6,8 @@ import {
   TouchpadCardConfig,
   TouchpadControlsProfile,
   TouchpadDeviceConfig,
+  TouchpadGestureAction,
+  TouchpadGestureModeConfig,
   TouchpadOptionConfig,
   TouchpadServerMessage,
   TouchpadThemeMode,
@@ -25,6 +27,8 @@ type BooleanOptionField =
   | 'invert_scroll';
 
 type NumberOptionField = 'sensitivity' | 'scroll_multiplier' | 'double_tap_ms' | 'tap_suppression_px';
+type GestureModeActionField = 'swipe_left' | 'swipe_right' | 'swipe_up' | 'swipe_down' | 'tap' | 'hold';
+type GestureActionOption = { value: TouchpadGestureAction; label: string };
 
 const BOOLEAN_DEFAULTS: Record<BooleanOptionField, boolean> = {
   show_lock: true,
@@ -62,6 +66,56 @@ const NUMBER_FIELDS: Array<{ field: NumberOptionField; label: string; step: stri
   { field: 'scroll_multiplier', label: 'Scroll multiplier', step: '0.1' },
   { field: 'double_tap_ms', label: 'Double tap window (ms)', step: '1' },
   { field: 'tap_suppression_px', label: 'Max move allowed for tap (px)', step: '1' },
+];
+
+const PC_GESTURE_ACTION_OPTIONS: GestureActionOption[] = [
+  { value: 'none', label: 'Do nothing' },
+  { value: 'enter', label: 'Enter' },
+  { value: 'escape', label: 'Escape' },
+  { value: 'backspace', label: 'Backspace' },
+  { value: 'tab', label: 'Tab' },
+  { value: 'space', label: 'Space' },
+  { value: 'delete', label: 'Delete' },
+  { value: 'arrow_left', label: 'Arrow left' },
+  { value: 'arrow_right', label: 'Arrow right' },
+  { value: 'arrow_up', label: 'Arrow up' },
+  { value: 'arrow_down', label: 'Arrow down' },
+  { value: 'home', label: 'Home' },
+  { value: 'end', label: 'End' },
+  { value: 'page_up', label: 'Page up' },
+  { value: 'page_down', label: 'Page down' },
+  { value: 'volume_up', label: 'Volume up' },
+  { value: 'volume_down', label: 'Volume down' },
+  { value: 'volume_mute', label: 'Mute' },
+];
+
+const WEBOS_GESTURE_ACTION_OPTIONS: GestureActionOption[] = [
+  { value: 'none', label: 'Do nothing' },
+  { value: 'enter', label: 'OK' },
+  { value: 'back', label: 'Back' },
+  { value: 'home', label: 'Home' },
+  { value: 'settings', label: 'Settings' },
+  { value: 'power', label: 'Power' },
+  { value: 'arrow_left', label: 'Left' },
+  { value: 'arrow_right', label: 'Right' },
+  { value: 'arrow_up', label: 'Up' },
+  { value: 'arrow_down', label: 'Down' },
+  { value: 'volume_up', label: 'Volume up' },
+  { value: 'volume_down', label: 'Volume down' },
+  { value: 'volume_mute', label: 'Mute' },
+];
+
+const GESTURE_ACTIONS = new Set<TouchpadGestureAction>(
+  [...PC_GESTURE_ACTION_OPTIONS, ...WEBOS_GESTURE_ACTION_OPTIONS].map(({ value }) => value)
+);
+
+const GESTURE_MODE_FIELDS: Array<{ field: GestureModeActionField; label: string }> = [
+  { field: 'swipe_left', label: 'Swipe left' },
+  { field: 'swipe_right', label: 'Swipe right' },
+  { field: 'swipe_up', label: 'Swipe up' },
+  { field: 'swipe_down', label: 'Swipe down' },
+  { field: 'tap', label: 'Tap' },
+  { field: 'hold', label: 'Hold' },
 ];
 
 interface TVAppPickerState {
@@ -218,102 +272,177 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
     wsUrl: string,
     update: (field: keyof TouchpadOptionConfig, value: unknown) => void
   ): TemplateResult {
-    const booleanFields = BOOLEAN_FIELDS.filter(({ field }) => field !== 'show_app_buttons' || controlsProfile === 'webos');
-    const showWebOSApps = controlsProfile === 'webos' && this._booleanValue(source, 'show_app_buttons');
+    const booleanFields = BOOLEAN_FIELDS.filter(({ field }) => field !== 'show_app_buttons');
+    const showWebOSAppSection = controlsProfile === 'webos';
 
     return html`
-      <div class="option-group">
-        <h4>Controls</h4>
-        <div class="toggles">
-          ${booleanFields.map(
-            ({ field, label }) => html`
-              <label class="toggle">
-                <input
-                  type="checkbox"
-                  .checked=${this._booleanValue(source, field)}
-                  @change=${(ev: Event) => update(field, (ev.target as HTMLInputElement).checked)}
-                />
-                <span>${label}</span>
-              </label>
-            `
-          )}
+      <details class="option-group collapsible">
+        <summary>Controls</summary>
+        <div class="collapsible-content">
+          <div class="toggles">
+            ${booleanFields.map(
+              ({ field, label }) => html`
+                <label class="toggle">
+                  <input
+                    type="checkbox"
+                    .checked=${this._booleanValue(source, field)}
+                    @change=${(ev: Event) => update(field, (ev.target as HTMLInputElement).checked)}
+                  />
+                  <span>${label}</span>
+                </label>
+              `
+            )}
+          </div>
         </div>
-      </div>
+      </details>
 
-      ${showWebOSApps ? this._renderWebOSApps(source, wsUrl, (apps) => update('webos_apps', apps)) : null}
+      ${showWebOSAppSection ? this._renderWebOSApps(source, wsUrl, update) : null}
+      ${this._renderGestureMode(source, controlsProfile, (gestureMode) => update('gesture_mode', gestureMode))}
 
-      <div class="option-group">
-        <h4>Gestures</h4>
-        <div class="fields">
-          ${NUMBER_FIELDS.map(({ field, label, step }) =>
-            this._renderNumberField(label, this._numberValue(source, field), NUMBER_DEFAULTS[field], step, (value) => update(field, value))
-          )}
+      <details class="option-group collapsible">
+        <summary>Touchpad tuning</summary>
+        <div class="collapsible-content">
+          <div class="fields">
+            ${NUMBER_FIELDS.map(({ field, label, step }) =>
+              this._renderNumberField(label, this._numberValue(source, field), NUMBER_DEFAULTS[field], step, (value) => update(field, value))
+            )}
+          </div>
         </div>
-      </div>
+      </details>
     `;
   }
 
-  private _renderWebOSApps(source: TouchpadOptionConfig, wsUrl: string, update: (apps: WebOSAppConfig[]) => void): TemplateResult {
+  protected updated(): void {
+    this._syncGestureActionSelects();
+  }
+
+  private _renderGestureMode(
+    source: TouchpadOptionConfig,
+    controlsProfile: TouchpadControlsProfile,
+    update: (gestureMode: TouchpadGestureModeConfig) => void
+  ): TemplateResult {
+    const gestureMode = this._gestureModeValue(source, controlsProfile);
+    const updateGestureMode = (patch: Partial<TouchpadGestureModeConfig>) => update({ ...gestureMode, ...patch });
+
+    return html`
+      <details class="option-group collapsible">
+        <summary>Gesture controls</summary>
+        <div class="collapsible-content">
+          <div class="toggles">
+            <label class="toggle">
+              <input
+                type="checkbox"
+                .checked=${gestureMode.show_button}
+                @change=${(ev: Event) => updateGestureMode({ show_button: (ev.target as HTMLInputElement).checked })}
+              />
+              <span>Show gesture mode button</span>
+            </label>
+            <label class="toggle">
+              <input
+                type="checkbox"
+                .checked=${gestureMode.invert_swipes}
+                @change=${(ev: Event) => updateGestureMode({ invert_swipes: (ev.target as HTMLInputElement).checked })}
+              />
+              <span>Reverse swipe directions</span>
+            </label>
+          </div>
+          <div class="fields">
+            ${GESTURE_MODE_FIELDS.map(({ field, label }) =>
+              this._renderGestureActionField(field, label, gestureMode[field], controlsProfile, (value) => updateGestureMode({ [field]: value }))
+            )}
+          </div>
+        </div>
+      </details>
+    `;
+  }
+
+  private _renderWebOSApps(
+    source: TouchpadOptionConfig,
+    wsUrl: string,
+    update: (field: keyof TouchpadOptionConfig, value: unknown) => void
+  ): TemplateResult {
     const apps = this._webOSAppsValue(source);
+    const showApps = this._booleanValue(source, 'show_app_buttons');
     const sourceKey = this._tvAppSourceKey(wsUrl);
     const picker = this._tvAppPicker.sourceKey === sourceKey ? this._tvAppPicker : { apps: [], loading: false };
     const existingIds = new Set(apps.map((app) => app.app_id));
     const tvApps = picker.apps.filter((app) => !existingIds.has(app.app_id));
     const pickerMessage = picker.message ?? (picker.apps.length > 0 && tvApps.length === 0 ? 'All TV apps are already in the list.' : undefined);
     return html`
-      <div class="option-group">
-        <div class="option-header">
-          <h4>webOS apps</h4>
-          <div class="button-row">
-            <button class="secondary" type="button" @click=${() => update([...apps, { name: 'App', app_id: '', icon: 'mdi:apps' }])}>
-              Add app
-            </button>
-            <button
-              class="secondary"
-              type="button"
-              ?disabled=${!String(wsUrl).trim() || picker.loading}
-              @click=${() => this._loadAppsFromTV(wsUrl)}
-            >
-              ${picker.loading ? 'Loading...' : 'Add from TV'}
-            </button>
+      <details class="option-group collapsible">
+        <summary>webOS app buttons</summary>
+        <div class="collapsible-content">
+          <div class="toggles">
+            <label class="toggle">
+              <input
+                type="checkbox"
+                .checked=${showApps}
+                @change=${(ev: Event) => update('show_app_buttons', (ev.target as HTMLInputElement).checked)}
+              />
+              <span>Show webOS app button</span>
+            </label>
+          </div>
+          <div class="app-toolbar">
+            <h4>Apps</h4>
+            <div class="button-row">
+              <button
+                class="secondary"
+                type="button"
+                @click=${() => update('webos_apps', [...apps, { name: 'App', app_id: '', icon: 'mdi:apps' }])}
+              >
+                Add app
+              </button>
+              <button
+                class="secondary"
+                type="button"
+                ?disabled=${!String(wsUrl).trim() || picker.loading}
+                @click=${() => this._loadAppsFromTV(wsUrl)}
+              >
+                ${picker.loading ? 'Loading...' : 'Add from TV'}
+              </button>
+            </div>
+          </div>
+          ${pickerMessage ? html`<div class="app-picker-message">${pickerMessage}</div>` : null}
+          ${tvApps.length > 0
+            ? html`<div class="tv-app-picker">
+                ${tvApps.map(
+                  (app) => html`<button class="tv-app-option" type="button" @click=${() => update('webos_apps', [...apps, app])}>
+                    ${app.icon ? html`<ha-icon icon=${app.icon}></ha-icon>` : null}
+                    <span>${app.name}</span>
+                  </button>`
+                )}
+              </div>`
+            : null}
+          <div class="app-list">
+            ${apps.map(
+              (app, index) => html`
+                <div class="app-row">
+                  <div class="app-main-fields">
+                    ${this._renderTextField('Name', app.name ?? '', 'Netflix', (value) =>
+                      this._updateWebOSApp(apps, index, 'name', value, (nextApps) => update('webos_apps', nextApps))
+                    )}
+                    ${this._renderTextField('App ID', app.app_id ?? '', 'netflix', (value) =>
+                      this._updateWebOSApp(apps, index, 'app_id', value, (nextApps) => update('webos_apps', nextApps))
+                    )}
+                  </div>
+                  <div class="app-action-fields">
+                    ${this._renderIconField('Icon', app.icon ?? '', 'compact', (value) =>
+                      this._updateWebOSApp(apps, index, 'icon', value || undefined, (nextApps) => update('webos_apps', nextApps))
+                    )}
+                    <button
+                      class="danger remove-app"
+                      type="button"
+                      @click=${() => update('webos_apps', apps.filter((_, appIndex) => appIndex !== index))}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                </div>
+              `
+            )}
           </div>
         </div>
-        ${pickerMessage ? html`<div class="app-picker-message">${pickerMessage}</div>` : null}
-        ${tvApps.length > 0
-          ? html`<div class="tv-app-picker">
-              ${tvApps.map(
-                (app) => html`<button class="tv-app-option" type="button" @click=${() => update([...apps, app])}>
-                  ${app.icon ? html`<ha-icon icon=${app.icon}></ha-icon>` : null}
-                  <span>${app.name}</span>
-                </button>`
-              )}
-            </div>`
-          : null}
-        <div class="app-list">
-          ${apps.map(
-            (app, index) => html`
-              <div class="app-row">
-                <div class="app-main-fields">
-                  ${this._renderTextField('Name', app.name ?? '', 'Netflix', (value) =>
-                    this._updateWebOSApp(apps, index, 'name', value, update)
-                  )}
-                  ${this._renderTextField('App ID', app.app_id ?? '', 'netflix', (value) =>
-                    this._updateWebOSApp(apps, index, 'app_id', value, update)
-                  )}
-                </div>
-                <div class="app-action-fields">
-                  ${this._renderIconField('Icon', app.icon ?? '', 'compact', (value) =>
-                    this._updateWebOSApp(apps, index, 'icon', value || undefined, update)
-                  )}
-                  <button class="danger remove-app" type="button" @click=${() => update(apps.filter((_, appIndex) => appIndex !== index))}>
-                    Remove
-                  </button>
-                </div>
-              </div>
-            `
-          )}
-        </div>
-      </div>
+      </details>
     `;
   }
 
@@ -460,6 +589,51 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
     `;
   }
 
+  private _renderGestureActionField(
+    field: GestureModeActionField,
+    label: string,
+    value: TouchpadGestureAction,
+    controlsProfile: TouchpadControlsProfile,
+    update: (value: TouchpadGestureAction) => void
+  ): TemplateResult {
+    const options = this._gestureActionOptions(controlsProfile, value);
+    return html`
+      <label class="field">
+        <span>${label}</span>
+        <select
+          class="gesture-action-select"
+          data-gesture-field=${field}
+          data-gesture-value=${value}
+          @change=${(ev: Event) => update(this._asGestureAction((ev.target as HTMLSelectElement).value))}
+        >
+          ${options.map(
+            ({ value: optionValue, label: optionLabel }) =>
+              html`<option value=${optionValue} ?selected=${optionValue === value}>${optionLabel}</option>`
+          )}
+        </select>
+      </label>
+    `;
+  }
+
+  private _gestureActionOptions(controlsProfile: TouchpadControlsProfile, selectedValue: TouchpadGestureAction): GestureActionOption[] {
+    const options = controlsProfile === 'webos' ? WEBOS_GESTURE_ACTION_OPTIONS : PC_GESTURE_ACTION_OPTIONS;
+    if (options.some(({ value }) => value === selectedValue)) {
+      return options;
+    }
+    const selectedOption = [...PC_GESTURE_ACTION_OPTIONS, ...WEBOS_GESTURE_ACTION_OPTIONS].find(({ value }) => value === selectedValue);
+    return selectedOption ? [...options, selectedOption] : options;
+  }
+
+  private _syncGestureActionSelects(): void {
+    const selects = this.renderRoot.querySelectorAll<HTMLSelectElement>('select.gesture-action-select');
+    selects.forEach((select) => {
+      const value = select.dataset.gestureValue;
+      if (value && select.value !== value) {
+        select.value = value;
+      }
+    });
+  }
+
   private _renderControlsProfileField(value: TouchpadControlsProfile, update: (value: TouchpadControlsProfile) => void): TemplateResult {
     return html`
       <label class="field">
@@ -517,6 +691,47 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
     }));
   }
 
+  private _defaultGestureMode(profile: TouchpadControlsProfile): Required<TouchpadGestureModeConfig> {
+    return {
+      show_button: true,
+      invert_swipes: false,
+      swipe_left: 'arrow_left',
+      swipe_right: 'arrow_right',
+      swipe_up: 'arrow_up',
+      swipe_down: 'arrow_down',
+      tap: 'enter',
+      hold: profile === 'webos' ? 'back' : 'escape',
+    };
+  }
+
+  private _gestureModeValue(source: TouchpadOptionConfig, controlsProfile: TouchpadControlsProfile): Required<TouchpadGestureModeConfig> {
+    const defaults = this._defaultGestureMode(controlsProfile);
+    const root = this._rootGestureModeForProfile(source, controlsProfile);
+    const local = source.gesture_mode ?? {};
+
+    return {
+      show_button: local.show_button ?? root.show_button ?? defaults.show_button,
+      invert_swipes: local.invert_swipes ?? root.invert_swipes ?? defaults.invert_swipes,
+      swipe_left: this._asGestureAction(local.swipe_left ?? root.swipe_left, defaults.swipe_left),
+      swipe_right: this._asGestureAction(local.swipe_right ?? root.swipe_right, defaults.swipe_right),
+      swipe_up: this._asGestureAction(local.swipe_up ?? root.swipe_up, defaults.swipe_up),
+      swipe_down: this._asGestureAction(local.swipe_down ?? root.swipe_down, defaults.swipe_down),
+      tap: this._asGestureAction(local.tap ?? root.tap, defaults.tap),
+      hold: this._asGestureAction(local.hold ?? root.hold, defaults.hold),
+    };
+  }
+
+  private _rootGestureModeForProfile(
+    source: TouchpadOptionConfig,
+    controlsProfile: TouchpadControlsProfile
+  ): TouchpadGestureModeConfig {
+    if (source === this._config) {
+      return {};
+    }
+    const rootProfile = this._asControlsProfile(this._config?.controls_profile ?? this._config?.backend ?? 'pc');
+    return rootProfile === controlsProfile ? this._config?.gesture_mode ?? {} : {};
+  }
+
   private _updateWebOSApp(
     apps: WebOSAppConfig[],
     index: number,
@@ -564,9 +779,45 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
     return value === 'dark' || value === 'light' ? value : 'auto';
   }
 
+  private _asGestureAction(value: unknown, fallback: TouchpadGestureAction = 'none'): TouchpadGestureAction {
+    const normalized = String(value ?? '').trim() as TouchpadGestureAction;
+    return GESTURE_ACTIONS.has(normalized) ? normalized : fallback;
+  }
+
+  private _cleanGestureModeAfterProfileChange(
+    target: TouchpadOptionConfig,
+    previousProfile: TouchpadControlsProfile,
+    nextProfile: TouchpadControlsProfile
+  ): void {
+    if (previousProfile === nextProfile) {
+      return;
+    }
+    if (!target.gesture_mode || this._isDefaultGestureMode(target.gesture_mode, previousProfile)) {
+      delete target.gesture_mode;
+    }
+  }
+
+  private _isDefaultGestureMode(gestureMode: TouchpadGestureModeConfig, controlsProfile: TouchpadControlsProfile): boolean {
+    const defaults = this._defaultGestureMode(controlsProfile);
+    return (
+      (gestureMode.show_button ?? defaults.show_button) === defaults.show_button &&
+      (gestureMode.invert_swipes ?? defaults.invert_swipes) === defaults.invert_swipes &&
+      this._asGestureAction(gestureMode.swipe_left, defaults.swipe_left) === defaults.swipe_left &&
+      this._asGestureAction(gestureMode.swipe_right, defaults.swipe_right) === defaults.swipe_right &&
+      this._asGestureAction(gestureMode.swipe_up, defaults.swipe_up) === defaults.swipe_up &&
+      this._asGestureAction(gestureMode.swipe_down, defaults.swipe_down) === defaults.swipe_down &&
+      this._asGestureAction(gestureMode.tap, defaults.tap) === defaults.tap &&
+      this._asGestureAction(gestureMode.hold, defaults.hold) === defaults.hold
+    );
+  }
+
   private _updateRootField(field: keyof TouchpadCardConfig, value: unknown): void {
     const next = this._currentConfig();
+    const previousProfile = this._controlsProfileValue(next);
     this._assign(next, field, value);
+    if (field === 'controls_profile') {
+      this._cleanGestureModeAfterProfileChange(next, previousProfile, this._controlsProfileValue(next));
+    }
     this._commitConfig(next);
   }
 
@@ -577,7 +828,11 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
     if (!current) return;
 
     const nextDevice = { ...current };
+    const previousProfile = this._controlsProfileValue(nextDevice);
     this._assign(nextDevice, field, value);
+    if (field === 'controls_profile') {
+      this._cleanGestureModeAfterProfileChange(nextDevice, previousProfile, this._controlsProfileValue(nextDevice));
+    }
     devices[index] = nextDevice;
 
     const next: TouchpadCardConfig = { ...config, devices };
@@ -619,6 +874,7 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
       delete next.wsUrl;
       delete next.backend;
       delete next.controls_profile;
+      delete next.gesture_mode;
     }
 
     this._selectedDeviceIndex = devices.length - 1;
@@ -643,10 +899,12 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
   }
 
   private _singleConfigFromDevice(config: TouchpadCardConfig, device: TouchpadDeviceConfig): TouchpadCardConfig {
+    const controlsProfile = this._asControlsProfile(device.controls_profile ?? device.backend ?? config.controls_profile ?? config.backend ?? 'pc');
+    const rootProfile = this._asControlsProfile(config.controls_profile ?? config.backend ?? 'pc');
     const next: TouchpadCardConfig = {
       ...config,
       wsUrl: device.wsUrl,
-      controls_profile: this._asControlsProfile(device.controls_profile ?? device.backend ?? config.controls_profile ?? config.backend ?? 'pc'),
+      controls_profile: controlsProfile,
       show_lock: device.show_lock,
       show_speed_buttons: device.show_speed_buttons,
       show_status_text: device.show_status_text,
@@ -655,6 +913,7 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
       show_fullscreen_button: device.show_fullscreen_button,
       show_app_buttons: device.show_app_buttons,
       auto_focus_keyboard: device.auto_focus_keyboard,
+      gesture_mode: device.gesture_mode ? { ...device.gesture_mode } : rootProfile === controlsProfile ? config.gesture_mode : undefined,
       webos_apps: device.webos_apps,
       invert_scroll: device.invert_scroll,
       sensitivity: device.sensitivity,
@@ -718,6 +977,11 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
     target.show_fullscreen_button = source.show_fullscreen_button ?? BOOLEAN_DEFAULTS.show_fullscreen_button;
     target.show_app_buttons = source.show_app_buttons ?? BOOLEAN_DEFAULTS.show_app_buttons;
     target.auto_focus_keyboard = source.auto_focus_keyboard ?? BOOLEAN_DEFAULTS.auto_focus_keyboard;
+    if (source.gesture_mode) {
+      target.gesture_mode = { ...source.gesture_mode };
+    } else {
+      delete target.gesture_mode;
+    }
     target.webos_apps = source.webos_apps?.map((app) => ({ ...app }));
     target.invert_scroll = source.invert_scroll ?? BOOLEAN_DEFAULTS.invert_scroll;
     target.sensitivity = source.sensitivity;
@@ -937,11 +1201,56 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
       padding-top: 2px;
     }
 
-    .option-header {
+    .collapsible summary {
       display: flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--primary-text-color);
+      list-style: none;
+      user-select: none;
+    }
+
+    .collapsible summary::-webkit-details-marker {
+      display: none;
+    }
+
+    .collapsible summary::before {
+      content: '';
+      width: 0;
+      height: 0;
+      border-top: 5px solid transparent;
+      border-bottom: 5px solid transparent;
+      border-left: 7px solid var(--secondary-text-color);
+      transform: rotate(0deg);
+      transition: transform 120ms ease;
+    }
+
+    .collapsible[open] summary::before {
+      transform: rotate(90deg);
+    }
+
+    .collapsible-content {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-top: 10px;
+      margin-left: 16px;
+    }
+
+    .option-header,
+    .app-toolbar {
+      display: flex;
+      flex-wrap: wrap;
       gap: 12px;
       align-items: center;
       justify-content: space-between;
+    }
+
+    .app-toolbar .button-row {
+      flex: 0 0 auto;
     }
 
     .button-row {
@@ -969,6 +1278,7 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
 
     .toggle input {
       flex: 0 0 auto;
+      margin-left: 0;
     }
 
     .app-list {

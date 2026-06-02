@@ -6,6 +6,8 @@ import {
   TouchpadCardConfig,
   TouchpadControlsProfile,
   TouchpadDeviceConfig,
+  TouchpadGestureAction,
+  TouchpadGestureModeConfig,
   TouchpadMessage,
   TouchpadServerMessage,
   TouchpadThemeMode,
@@ -15,7 +17,9 @@ import {
 import { DEFAULT_WEBOS_APPS, normalizeWebOSApps } from './webos-apps';
 import './touchpad-card-editor';
 
-type PointerGesture = 'move' | 'scroll' | null;
+type PointerGesture = 'move' | 'scroll' | 'gesture' | null;
+type GestureDirection = 'swipe_left' | 'swipe_right' | 'swipe_up' | 'swipe_down';
+type GestureEventName = GestureDirection | 'tap' | 'hold';
 
 interface PointerState {
   id: number;
@@ -65,6 +69,7 @@ interface TouchpadRuntimeOptions {
   showFullscreenButton: boolean;
   showAppButtons: boolean;
   autoFocusKeyboard: boolean;
+  gestureMode: Required<TouchpadGestureModeConfig>;
   webosApps: WebOSAppConfig[];
 }
 
@@ -73,6 +78,7 @@ interface PersistedDeviceUiState {
   speedMultiplier?: number;
   keyboardOpen?: boolean;
   appLauncherOpen?: boolean;
+  gestureModeActive?: boolean;
 }
 
 interface PersistedUiState extends PersistedDeviceUiState {
@@ -83,6 +89,7 @@ interface PersistedUiState extends PersistedDeviceUiState {
 
 const HOLD_DELAY_MS = 320;
 const HOLD_CANCEL_PX = 3;
+const GESTURE_SWIPE_MIN_PX = 42;
 const RECONNECT_BASE_MS = 1500;
 const RECONNECT_MAX_MS = 15000;
 
@@ -131,6 +138,43 @@ const DEFAULTS = {
   autoFocusKeyboard: true,
 };
 
+const GESTURE_ACTIONS = new Set<TouchpadGestureAction>([
+  'none',
+  'enter',
+  'backspace',
+  'escape',
+  'back',
+  'tab',
+  'space',
+  'delete',
+  'arrow_left',
+  'arrow_right',
+  'arrow_up',
+  'arrow_down',
+  'home',
+  'end',
+  'page_up',
+  'page_down',
+  'power',
+  'settings',
+  'volume_up',
+  'volume_down',
+  'volume_mute',
+]);
+
+function defaultGestureMode(profile: TouchpadControlsProfile): Required<TouchpadGestureModeConfig> {
+  return {
+    show_button: true,
+    invert_swipes: false,
+    swipe_left: 'arrow_left',
+    swipe_right: 'arrow_right',
+    swipe_up: 'arrow_up',
+    swipe_down: 'arrow_down',
+    tap: 'enter',
+    hold: profile === 'webos' ? 'back' : 'escape',
+  };
+}
+
 function createStorageId(): string {
   return `tp_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
 }
@@ -147,6 +191,7 @@ export class TouchpadCard extends LitElement {
   @state() private _keyboardOpen = false;
   @state() private _appLauncherOpen = false;
   @state() private _fullscreenActive = false;
+  @state() private _gestureModeActive = false;
   @state() private _availableAppIds?: Set<string>;
   @state() private _unavailableAppIds = new Set<string>();
   @state() private _appNotice?: string;
@@ -169,6 +214,7 @@ export class TouchpadCard extends LitElement {
   private lastTapTime = 0;
   private tapTimer?: number;
   private holdTimer?: number;
+  private gestureHoldFired = false;
   private dragPointerId?: number;
   private lockedPan?: LockedPanState;
 
@@ -188,6 +234,7 @@ export class TouchpadCard extends LitElement {
     showFullscreenButton: DEFAULTS.showFullscreenButton,
     showAppButtons: DEFAULTS.showAppButtons,
     autoFocusKeyboard: DEFAULTS.autoFocusKeyboard,
+    gestureMode: defaultGestureMode(DEFAULTS.controlsProfile),
     webosApps: DEFAULT_WEBOS_APPS,
   };
 
@@ -224,6 +271,7 @@ export class TouchpadCard extends LitElement {
     this._locked = false;
     this._keyboardOpen = false;
     this._appLauncherOpen = false;
+    this._gestureModeActive = false;
     this._speedMultiplier = 1;
     this.restoreUiState();
     this.applyActiveDeviceOptions();
@@ -299,11 +347,41 @@ export class TouchpadCard extends LitElement {
     return config.controls_profile ?? config.backend;
   }
 
+  private normalizeGestureAction(action: TouchpadGestureAction | undefined, fallback: TouchpadGestureAction): TouchpadGestureAction {
+    const normalized = String(action ?? '').trim() as TouchpadGestureAction;
+    return GESTURE_ACTIONS.has(normalized) ? normalized : fallback;
+  }
+
+  private resolveGestureMode(
+    config: TouchpadCardConfig,
+    device: TouchpadDeviceConfig | undefined,
+    controlsProfile: TouchpadControlsProfile
+  ): Required<TouchpadGestureModeConfig> {
+    const defaults = defaultGestureMode(controlsProfile);
+    const rootProfile = this.normalizeControlsProfile(this.configuredControlsProfile(config));
+    const root = !device || rootProfile === controlsProfile ? config.gesture_mode ?? {} : {};
+    const local = device?.gesture_mode ?? {};
+
+    return {
+      show_button: local.show_button ?? root.show_button ?? defaults.show_button,
+      invert_swipes: local.invert_swipes ?? root.invert_swipes ?? defaults.invert_swipes,
+      swipe_left: this.normalizeGestureAction(local.swipe_left ?? root.swipe_left, defaults.swipe_left),
+      swipe_right: this.normalizeGestureAction(local.swipe_right ?? root.swipe_right, defaults.swipe_right),
+      swipe_up: this.normalizeGestureAction(local.swipe_up ?? root.swipe_up, defaults.swipe_up),
+      swipe_down: this.normalizeGestureAction(local.swipe_down ?? root.swipe_down, defaults.swipe_down),
+      tap: this.normalizeGestureAction(local.tap ?? root.tap, defaults.tap),
+      hold: this.normalizeGestureAction(local.hold ?? root.hold, defaults.hold),
+    };
+  }
+
   private resolveOptions(config: TouchpadCardConfig, device?: TouchpadDeviceConfig): TouchpadRuntimeOptions {
     const webosApps = device?.webos_apps ?? config.webos_apps;
+    const controlsProfile = this.normalizeControlsProfile(
+      this.configuredControlsProfile(device ?? config) ?? this.configuredControlsProfile(config)
+    );
     return {
       themeMode: this.normalizeThemeMode(config.theme_mode),
-      controlsProfile: this.normalizeControlsProfile(this.configuredControlsProfile(device ?? config) ?? this.configuredControlsProfile(config)),
+      controlsProfile,
       sensitivity: device?.sensitivity ?? config.sensitivity ?? DEFAULTS.sensitivity,
       scrollMultiplier: device?.scroll_multiplier ?? config.scroll_multiplier ?? DEFAULTS.scrollMultiplier,
       invertScroll: device?.invert_scroll ?? config.invert_scroll ?? DEFAULTS.invertScroll,
@@ -317,6 +395,7 @@ export class TouchpadCard extends LitElement {
       showFullscreenButton: device?.show_fullscreen_button ?? config.show_fullscreen_button ?? DEFAULTS.showFullscreenButton,
       showAppButtons: device?.show_app_buttons ?? config.show_app_buttons ?? DEFAULTS.showAppButtons,
       autoFocusKeyboard: device?.auto_focus_keyboard ?? config.auto_focus_keyboard ?? DEFAULTS.autoFocusKeyboard,
+      gestureMode: this.resolveGestureMode(config, device, controlsProfile),
       webosApps: normalizeWebOSApps(webosApps ?? DEFAULT_WEBOS_APPS),
     };
   }
@@ -376,6 +455,7 @@ export class TouchpadCard extends LitElement {
         show_fullscreen_button: config.show_fullscreen_button,
         show_app_buttons: config.show_app_buttons,
         auto_focus_keyboard: config.auto_focus_keyboard,
+        gesture_mode: config.gesture_mode,
         webos_apps: config.webos_apps,
       },
     ];
@@ -408,8 +488,25 @@ export class TouchpadCard extends LitElement {
     if (!this.canShowAppLauncherToggle()) {
       this._appLauncherOpen = false;
     }
+    if (!this.opts.gestureMode.show_button) {
+      this._gestureModeActive = false;
+    }
     if (!this.opts.showFullscreenButton && this._fullscreenActive) {
       void this.exitFullscreen();
+    }
+  }
+
+  private isPlaceholderWsUrl(wsUrl: string | undefined): boolean {
+    const value = String(wsUrl ?? '').trim();
+    if (!value) {
+      return true;
+    }
+
+    try {
+      const hostname = new URL(value).hostname.toLowerCase();
+      return hostname === 'your-host' || hostname === 'your-pc-lan-ip' || hostname.startsWith('your-');
+    } catch {
+      return false;
     }
   }
 
@@ -418,7 +515,8 @@ export class TouchpadCard extends LitElement {
     this.teardownSocket(false);
 
     const device = this.activeDevice;
-    if (!device?.wsUrl) {
+    const wsUrl = String(device?.wsUrl ?? '').trim();
+    if (!wsUrl || this.isPlaceholderWsUrl(wsUrl)) {
       this.setStatus('disconnected');
       return;
     }
@@ -426,7 +524,7 @@ export class TouchpadCard extends LitElement {
     this.setStatus('connecting');
     this.wsErrorNotified = false;
     try {
-      this.socket = new WebSocket(device.wsUrl);
+      this.socket = new WebSocket(wsUrl);
     } catch (err) {
       logCardError('Failed to initialize WebSocket connection. Check WebSocket URL.', err);
       this.setStatus('error');
@@ -658,6 +756,7 @@ export class TouchpadCard extends LitElement {
     this._speedMultiplier = 1;
     this._keyboardOpen = false;
     this._appLauncherOpen = false;
+    this._gestureModeActive = false;
   }
 
   private restoreDeviceUiState(parsed: PersistedUiState | null = this.loadPersistedUiState()): void {
@@ -668,7 +767,8 @@ export class TouchpadCard extends LitElement {
       (typeof parsed.locked === 'boolean' ||
         this.isSpeedMultiplier(parsed.speedMultiplier) ||
         typeof parsed.keyboardOpen === 'boolean' ||
-        typeof parsed.appLauncherOpen === 'boolean')
+        typeof parsed.appLauncherOpen === 'boolean' ||
+        typeof parsed.gestureModeActive === 'boolean')
         ? parsed
         : undefined;
     const state = deviceState ?? legacyState;
@@ -685,6 +785,9 @@ export class TouchpadCard extends LitElement {
     }
     if (typeof state?.appLauncherOpen === 'boolean') {
       this._appLauncherOpen = state.appLauncherOpen;
+    }
+    if (typeof state?.gestureModeActive === 'boolean') {
+      this._gestureModeActive = state.gestureModeActive;
     }
     this.applyActiveDeviceOptions();
   }
@@ -722,6 +825,7 @@ export class TouchpadCard extends LitElement {
           speedMultiplier: this._speedMultiplier,
           keyboardOpen: this.opts.showKeyboardButton ? this._keyboardOpen : false,
           appLauncherOpen: this.canShowAppLauncherToggle() ? this._appLauncherOpen : false,
+          gestureModeActive: this.opts.gestureMode.show_button ? this._gestureModeActive : false,
         };
       }
 
@@ -765,6 +869,10 @@ export class TouchpadCard extends LitElement {
       this.startLockedPan(ev);
       return;
     }
+    if (this._gestureModeActive) {
+      this.startGestureModePointer(ev);
+      return;
+    }
     ev.preventDefault();
     this.captureLayer?.setPointerCapture(ev.pointerId);
 
@@ -791,6 +899,10 @@ export class TouchpadCard extends LitElement {
   private handlePointerMove = (ev: PointerEvent): void => {
     if (this._locked) {
       this.moveLockedPan(ev);
+      return;
+    }
+    if (this._gestureModeActive) {
+      this.moveGestureModePointer(ev);
       return;
     }
     const pointer = this.pointers.get(ev.pointerId);
@@ -831,6 +943,10 @@ export class TouchpadCard extends LitElement {
   private handlePointerUp = (ev: PointerEvent): void => {
     if (this._locked) {
       this.endLockedPan(ev);
+      return;
+    }
+    if (this._gestureModeActive) {
+      this.endGestureModePointer(ev);
       return;
     }
     const pointer = this.pointers.get(ev.pointerId);
@@ -896,6 +1012,10 @@ export class TouchpadCard extends LitElement {
       this.endLockedPan(ev);
       return;
     }
+    if (this._gestureModeActive) {
+      this.cancelGestureModePointer(ev);
+      return;
+    }
     if (this.pointers.has(ev.pointerId)) {
       this.pointers.delete(ev.pointerId);
     }
@@ -908,6 +1028,145 @@ export class TouchpadCard extends LitElement {
       this.gesture = null;
     }
   };
+
+  private startGestureModePointer(ev: PointerEvent): void {
+    ev.preventDefault();
+    this.captureLayer?.setPointerCapture(ev.pointerId);
+    this.endDragIfNeeded();
+
+    const now = performance.now();
+    this.pointers.set(ev.pointerId, {
+      id: ev.pointerId,
+      x: ev.clientX,
+      y: ev.clientY,
+      startX: ev.clientX,
+      startY: ev.clientY,
+      startTime: now,
+    });
+
+    this.gesture = 'gesture';
+    if (this.pointers.size === 1) {
+      this.gestureHoldFired = false;
+      this.startGestureModeHoldTimer(ev);
+    } else {
+      this.cancelHoldTimer();
+    }
+  }
+
+  private moveGestureModePointer(ev: PointerEvent): void {
+    const pointer = this.pointers.get(ev.pointerId);
+    if (!pointer) return;
+
+    ev.preventDefault();
+    pointer.x = ev.clientX;
+    pointer.y = ev.clientY;
+    this.pointers.set(ev.pointerId, pointer);
+
+    const distFromStart = Math.hypot(pointer.x - pointer.startX, pointer.y - pointer.startY);
+    if (this.holdTimer && distFromStart > HOLD_CANCEL_PX) {
+      this.cancelHoldTimer();
+    }
+  }
+
+  private endGestureModePointer(ev: PointerEvent): void {
+    const pointer = this.pointers.get(ev.pointerId);
+    if (!pointer) return;
+
+    ev.preventDefault();
+    const beforeCount = this.pointers.size;
+    const dist = Math.hypot(ev.clientX - pointer.startX, ev.clientY - pointer.startY);
+
+    this.pointers.delete(ev.pointerId);
+    this.cancelHoldTimer();
+
+    if (beforeCount === 1 && this.gesture === 'gesture' && !this.gestureHoldFired) {
+      const direction = this.gestureSwipeDirection(pointer, ev.clientX, ev.clientY);
+      if (direction) {
+        this.executeGesture(direction);
+      } else if (dist <= this.opts.tapSuppressionPx) {
+        this.executeGesture('tap');
+      }
+    }
+
+    if (this.pointers.size === 0) {
+      this.gesture = null;
+      this.gestureHoldFired = false;
+    }
+  }
+
+  private cancelGestureModePointer(ev: PointerEvent): void {
+    if (this.pointers.has(ev.pointerId)) {
+      this.pointers.delete(ev.pointerId);
+    }
+    this.cancelHoldTimer();
+    if (this.pointers.size === 0) {
+      this.gesture = null;
+      this.gestureHoldFired = false;
+    }
+  }
+
+  private startGestureModeHoldTimer(ev: PointerEvent): void {
+    this.cancelHoldTimer();
+    this.holdTimer = window.setTimeout(() => {
+      const pointer = this.pointers.get(ev.pointerId);
+      if (!pointer) return;
+      const dist = Math.hypot(pointer.x - pointer.startX, pointer.y - pointer.startY);
+      if (this.pointers.size === 1 && this.gesture === 'gesture' && dist <= HOLD_CANCEL_PX) {
+        this.gestureHoldFired = true;
+        this.executeGesture('hold');
+        this.hapticHold();
+      }
+      this.holdTimer = undefined;
+    }, HOLD_DELAY_MS);
+  }
+
+  private gestureSwipeDirection(pointer: PointerState, endX: number, endY: number): GestureDirection | null {
+    const dx = endX - pointer.startX;
+    const dy = endY - pointer.startY;
+    const minSwipeDistance = Math.max(GESTURE_SWIPE_MIN_PX, this.opts.tapSuppressionPx * 3);
+    if (Math.hypot(dx, dy) < minSwipeDistance) {
+      return null;
+    }
+
+    const direction: GestureDirection =
+      Math.abs(dx) >= Math.abs(dy) ? (dx < 0 ? 'swipe_left' : 'swipe_right') : dy < 0 ? 'swipe_up' : 'swipe_down';
+    return this.opts.gestureMode.invert_swipes ? this.invertedGestureDirection(direction) : direction;
+  }
+
+  private invertedGestureDirection(direction: GestureDirection): GestureDirection {
+    switch (direction) {
+      case 'swipe_left':
+        return 'swipe_right';
+      case 'swipe_right':
+        return 'swipe_left';
+      case 'swipe_up':
+        return 'swipe_down';
+      case 'swipe_down':
+        return 'swipe_up';
+    }
+  }
+
+  private executeGesture(eventName: GestureEventName): void {
+    this.executeGestureAction(this.opts.gestureMode[eventName]);
+  }
+
+  private executeGestureAction(action: TouchpadGestureAction): void {
+    switch (action) {
+      case 'none':
+        return;
+      case 'volume_up':
+        this.sendVolume('up');
+        return;
+      case 'volume_down':
+        this.sendVolume('down');
+        return;
+      case 'volume_mute':
+        this.sendVolume('mute');
+        return;
+      default:
+        this.sendKey(action);
+    }
+  }
 
   private startLockedPan(ev: PointerEvent): void {
     if (ev.pointerType !== 'touch' && ev.pointerType !== 'pen') return;
@@ -1287,6 +1546,9 @@ export class TouchpadCard extends LitElement {
     this.cancelHoldTimer();
     this.lockedPan = undefined;
     this._locked = !this._locked;
+    if (this._locked) {
+      this._gestureModeActive = false;
+    }
     this.persistUiState();
   };
 
@@ -1306,6 +1568,17 @@ export class TouchpadCard extends LitElement {
     ev.stopPropagation();
     if (!this.canShowAppLauncherToggle()) return;
     this._appLauncherOpen = !this._appLauncherOpen;
+    this.persistUiState();
+  };
+
+  private toggleGestureMode = (ev: Event): void => {
+    ev.stopPropagation();
+    if (!this.opts.gestureMode.show_button) return;
+    this.resetInteractionState();
+    if (!this._gestureModeActive && this._locked) {
+      this._locked = false;
+    }
+    this._gestureModeActive = !this._gestureModeActive;
     this.persistUiState();
   };
 
@@ -1347,6 +1620,7 @@ export class TouchpadCard extends LitElement {
     }
     this.pointers.clear();
     this.gesture = null;
+    this.gestureHoldFired = false;
     this.lastTapTime = 0;
     this.lockedPan = undefined;
     this.moveAccum = { x: 0, y: 0 };
@@ -1509,6 +1783,20 @@ export class TouchpadCard extends LitElement {
                 <ha-icon icon=${this._fullscreenActive ? 'mdi:fullscreen-exit' : 'mdi:fullscreen'}></ha-icon>
               </button>`
             : nothing}
+          ${this.opts.gestureMode.show_button
+            ? html`<button
+                class="gesture-toggle ${this._gestureModeActive ? 'active' : ''} ${this.opts.showFullscreenButton
+                  ? 'with-fullscreen-toggle'
+                  : ''}"
+                type="button"
+                title=${this._gestureModeActive ? 'Exit gesture mode' : 'Gesture mode'}
+                @pointerdown=${(e: Event) => e.stopPropagation()}
+                @pointerup=${(e: Event) => e.stopPropagation()}
+                @click=${this.toggleGestureMode}
+              >
+                <ha-icon icon="mdi:gesture-swipe"></ha-icon>
+              </button>`
+            : nothing}
           <div
             class="capture"
             @pointerdown=${this.handlePointerDown}
@@ -1520,7 +1808,7 @@ export class TouchpadCard extends LitElement {
           ></div>
           ${this.opts.showStatusText
             ? html`<div class="status">
-                ${this.statusLabel()}${this._locked ? ' (Locked)' : ''}
+                ${this.statusLabel()}${this._locked ? ' (Locked)' : ''}${this._gestureModeActive ? ' (Gestures)' : ''}
               </div>`
             : nothing}
         </div>
@@ -1905,7 +2193,8 @@ export class TouchpadCard extends LitElement {
       box-shadow: 0 0 0 1px var(--tp-accent-ring);
     }
 
-    .fullscreen-toggle {
+    .fullscreen-toggle,
+    .gesture-toggle {
       position: absolute;
       left: 12px;
       top: 50%;
@@ -1925,19 +2214,27 @@ export class TouchpadCard extends LitElement {
       transition: all 140ms ease;
     }
 
-    .fullscreen-toggle:hover {
+    .gesture-toggle.with-fullscreen-toggle {
+      transform: translateY(calc(-50% - 52px));
+    }
+
+    .fullscreen-toggle:hover,
+    .gesture-toggle:hover {
       border-color: var(--tp-border-strong);
       color: var(--tp-strong-text);
     }
 
-    .fullscreen-toggle.active {
+    .fullscreen-toggle.active,
+    .gesture-toggle.active {
       color: var(--tp-accent);
       border-color: var(--tp-accent-border);
       box-shadow: 0 0 0 1px var(--tp-accent-ring);
     }
 
     ha-card.fullscreen .fullscreen-toggle,
-    :host(:fullscreen) .fullscreen-toggle {
+    :host(:fullscreen) .fullscreen-toggle,
+    ha-card.fullscreen .gesture-toggle,
+    :host(:fullscreen) .gesture-toggle {
       left: max(12px, env(safe-area-inset-left));
     }
 
@@ -1967,7 +2264,8 @@ export class TouchpadCard extends LitElement {
     .icon-btn ha-icon,
     .keyboard-toggle ha-icon,
     .app-toggle ha-icon,
-    .fullscreen-toggle ha-icon {
+    .fullscreen-toggle ha-icon,
+    .gesture-toggle ha-icon {
       width: 20px;
       height: 20px;
       display: flex;
