@@ -1,5 +1,8 @@
 # Card Changelog
 
+## 0.9.0
+- Added a remembered webOS app toggle button that shows or hides configured app shortcuts.
+
 ## 0.8.0
 - Added an optional fullscreen touchpad mode with native Fullscreen API support and a card-level fallback for mobile WebViews.
 - Repositioned the status text, keyboard toggle, and fullscreen button for a cleaner fullscreen/mobile layout.

@@ -72,6 +72,7 @@ interface PersistedDeviceUiState {
   locked?: boolean;
   speedMultiplier?: number;
   keyboardOpen?: boolean;
+  appLauncherOpen?: boolean;
 }
 
 interface PersistedUiState extends PersistedDeviceUiState {
@@ -144,6 +145,7 @@ export class TouchpadCard extends LitElement {
   @state() private _locked = false;
   @state() private _speedMultiplier: 1 | 2 | 3 | 4 = 1;
   @state() private _keyboardOpen = false;
+  @state() private _appLauncherOpen = false;
   @state() private _fullscreenActive = false;
   @state() private _availableAppIds?: Set<string>;
   @state() private _unavailableAppIds = new Set<string>();
@@ -221,6 +223,7 @@ export class TouchpadCard extends LitElement {
 
     this._locked = false;
     this._keyboardOpen = false;
+    this._appLauncherOpen = false;
     this._speedMultiplier = 1;
     this.restoreUiState();
     this.applyActiveDeviceOptions();
@@ -401,6 +404,9 @@ export class TouchpadCard extends LitElement {
     }
     if (!this.opts.showSpeedButtons) {
       this._speedMultiplier = 1;
+    }
+    if (!this.canShowAppLauncherToggle()) {
+      this._appLauncherOpen = false;
     }
     if (!this.opts.showFullscreenButton && this._fullscreenActive) {
       void this.exitFullscreen();
@@ -651,13 +657,18 @@ export class TouchpadCard extends LitElement {
     this._locked = false;
     this._speedMultiplier = 1;
     this._keyboardOpen = false;
+    this._appLauncherOpen = false;
   }
 
   private restoreDeviceUiState(parsed: PersistedUiState | null = this.loadPersistedUiState()): void {
     const deviceId = this.activeDeviceStorageId();
     const deviceState = deviceId ? parsed?.deviceStates?.[deviceId] : undefined;
     const legacyState =
-      parsed && (typeof parsed.locked === 'boolean' || this.isSpeedMultiplier(parsed.speedMultiplier) || typeof parsed.keyboardOpen === 'boolean')
+      parsed &&
+      (typeof parsed.locked === 'boolean' ||
+        this.isSpeedMultiplier(parsed.speedMultiplier) ||
+        typeof parsed.keyboardOpen === 'boolean' ||
+        typeof parsed.appLauncherOpen === 'boolean')
         ? parsed
         : undefined;
     const state = deviceState ?? legacyState;
@@ -671,6 +682,9 @@ export class TouchpadCard extends LitElement {
     }
     if (typeof state?.keyboardOpen === 'boolean') {
       this._keyboardOpen = state.keyboardOpen;
+    }
+    if (typeof state?.appLauncherOpen === 'boolean') {
+      this._appLauncherOpen = state.appLauncherOpen;
     }
     this.applyActiveDeviceOptions();
   }
@@ -707,6 +721,7 @@ export class TouchpadCard extends LitElement {
           locked: this._locked,
           speedMultiplier: this._speedMultiplier,
           keyboardOpen: this.opts.showKeyboardButton ? this._keyboardOpen : false,
+          appLauncherOpen: this.canShowAppLauncherToggle() ? this._appLauncherOpen : false,
         };
       }
 
@@ -1287,6 +1302,13 @@ export class TouchpadCard extends LitElement {
     }
   };
 
+  private toggleAppLauncher = (ev: Event): void => {
+    ev.stopPropagation();
+    if (!this.canShowAppLauncherToggle()) return;
+    this._appLauncherOpen = !this._appLauncherOpen;
+    this.persistUiState();
+  };
+
   private toggleSpeed(mult: 2 | 3 | 4): void {
     this._speedMultiplier = this._speedMultiplier === mult ? 1 : mult;
     this.persistUiState();
@@ -1352,13 +1374,18 @@ export class TouchpadCard extends LitElement {
     }
   }
 
+  private canShowAppLauncherToggle(): boolean {
+    return this.opts.controlsProfile === 'webos' && this.opts.showAppButtons && this.opts.webosApps.length > 0;
+  }
+
   protected render() {
     if (!this._config) return nothing;
 
     const showKeyboardSection = this.opts.showKeyboardButton && this._keyboardOpen;
     const showDeviceTabs = this._devices.length > 1;
     const isWebos = this.opts.controlsProfile === 'webos';
-    const showAppLauncher = isWebos && this.opts.showAppButtons && this.opts.webosApps.length > 0;
+    const showAppLauncherToggle = this.canShowAppLauncherToggle();
+    const showAppLauncher = showAppLauncherToggle && this._appLauncherOpen;
     const themeClass = `theme-${this.effectiveThemeMode()}`;
     const cardClass = `${themeClass} ${this._fullscreenActive ? 'fullscreen' : ''}`;
     const keyboardPlaceholder = isWebos ? 'Tap to type on TV' : 'Tap to type on PC';
@@ -1453,10 +1480,21 @@ export class TouchpadCard extends LitElement {
           ${this.opts.showKeyboardButton
             ? html`<button
                 class="keyboard-toggle ${this._keyboardOpen ? 'active' : ''}"
+                type="button"
                 title="Keyboard"
                 @click=${this.toggleKeyboardPanel}
               >
                 <ha-icon icon="mdi:keyboard-outline"></ha-icon>
+              </button>`
+            : nothing}
+          ${showAppLauncherToggle
+            ? html`<button
+                class="app-toggle ${this._appLauncherOpen ? 'active' : ''} ${this.opts.showKeyboardButton ? 'with-keyboard-toggle' : ''}"
+                type="button"
+                title="Apps"
+                @click=${this.toggleAppLauncher}
+              >
+                <ha-icon icon="mdi:apps"></ha-icon>
               </button>`
             : nothing}
           ${this.opts.showFullscreenButton
@@ -1753,7 +1791,7 @@ export class TouchpadCard extends LitElement {
       position: absolute;
       right: 14px;
       bottom: 12px;
-      max-width: calc(100% - 92px);
+      max-width: calc(100% - 156px);
       font-size: 13px;
       color: var(--tp-subtle-text);
       text-align: right;
@@ -1823,9 +1861,9 @@ export class TouchpadCard extends LitElement {
       transform: scale(0.96);
     }
 
-    .keyboard-toggle {
+    .keyboard-toggle,
+    .app-toggle {
       position: absolute;
-      left: 12px;
       bottom: 12px;
       z-index: 3;
       width: 44px;
@@ -1842,12 +1880,26 @@ export class TouchpadCard extends LitElement {
       transition: all 140ms ease;
     }
 
-    .keyboard-toggle:hover {
+    .keyboard-toggle {
+      left: 12px;
+    }
+
+    .app-toggle {
+      left: 12px;
+    }
+
+    .app-toggle.with-keyboard-toggle {
+      left: 64px;
+    }
+
+    .keyboard-toggle:hover,
+    .app-toggle:hover {
       border-color: var(--tp-border-strong);
       color: var(--tp-strong-text);
     }
 
-    .keyboard-toggle.active {
+    .keyboard-toggle.active,
+    .app-toggle.active {
       color: var(--tp-accent);
       border-color: var(--tp-accent-border);
       box-shadow: 0 0 0 1px var(--tp-accent-ring);
@@ -1895,6 +1947,17 @@ export class TouchpadCard extends LitElement {
       bottom: max(12px, env(safe-area-inset-bottom));
     }
 
+    ha-card.fullscreen .app-toggle,
+    :host(:fullscreen) .app-toggle {
+      left: max(12px, env(safe-area-inset-left));
+      bottom: max(12px, env(safe-area-inset-bottom));
+    }
+
+    ha-card.fullscreen .app-toggle.with-keyboard-toggle,
+    :host(:fullscreen) .app-toggle.with-keyboard-toggle {
+      left: calc(max(12px, env(safe-area-inset-left)) + 52px);
+    }
+
     ha-card.fullscreen .status,
     :host(:fullscreen) .status {
       right: max(14px, env(safe-area-inset-right));
@@ -1903,6 +1966,7 @@ export class TouchpadCard extends LitElement {
 
     .icon-btn ha-icon,
     .keyboard-toggle ha-icon,
+    .app-toggle ha-icon,
     .fullscreen-toggle ha-icon {
       width: 20px;
       height: 20px;

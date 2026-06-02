@@ -52,9 +52,9 @@ const BOOLEAN_FIELDS: Array<{ field: BooleanOptionField; label: string }> = [
   { field: 'show_audio_controls', label: 'Show audio icons' },
   { field: 'show_keyboard_button', label: 'Show keyboard toggle' },
   { field: 'show_fullscreen_button', label: 'Show fullscreen button' },
-  { field: 'show_app_buttons', label: 'Show webOS app buttons' },
   { field: 'auto_focus_keyboard', label: 'Focus keyboard input when opened' },
   { field: 'invert_scroll', label: 'Reverse scroll direction' },
+  { field: 'show_app_buttons', label: 'Show webOS app button' },
 ];
 
 const NUMBER_FIELDS: Array<{ field: NumberOptionField; label: string; step: string }> = [

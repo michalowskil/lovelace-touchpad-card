@@ -78,9 +78,9 @@ Add the card in the UI and configure everything from the visual editor.
 4. Start the add-on and enable **Start on boot** and **Watchdog** if desired.
 5. In each touchpad card set `wsUrl` to the matching port (for example `ws://homeassistant.local:8777`).
 
-## Optional webOS App Buttons
+## Optional webOS App Button
 
-For a webOS device, set **Controls profile** to **LG webOS controls** and enable **Show webOS app buttons** in the card editor. The card then shows app buttons below the touchpad surface.
+For a webOS device, set **Controls profile** to **LG webOS controls** and enable **Show webOS app button** in the card editor. The card then shows an app toggle next to the keyboard toggle; tapping it shows or hides the configured app buttons below the touchpad surface.
 
 When the bridge can read the TV app list, buttons for apps that are not installed are shown dimmed. If the TV cannot provide that list, the buttons stay clickable; a failed launch shows a short message and dims that app for the current session.
 
@@ -160,7 +160,7 @@ Example with the **NGINX Home Assistant SSL proxy** add-on:
 For remote access, you only need to expose your HTTPS port (usually `443`) to the internet. Do not expose backend ports (for example `8765` or `8778`) directly unless you understand the risk: these WebSocket backends do not add their own login screen.
 
 ## Changelog
-- **Card (frontend):** latest v0.8.0 — see [CHANGELOG.md](CHANGELOG.md). Highlights: fullscreen touchpad mode plus repositioned status, keyboard, and fullscreen controls for mobile use.
+- **Card (frontend):** latest v0.9.0 — see [CHANGELOG.md](CHANGELOG.md). Highlights: remembered webOS app toggle button for showing or hiding configured app shortcuts.
 - **Windows backend:** latest v0.5.1 — see [backend/CHANGELOG.md](backend/CHANGELOG.md). Highlights: tray update checks now track the Windows backend version, so card-only releases do not notify Windows users.
 - **webOS add-on:** latest v0.4.0 — see [addon/webos-pointer-bridge/CHANGELOG.md](addon/webos-pointer-bridge/CHANGELOG.md). Highlights: app launch support plus installed-app reporting for the card editor picker.
 
