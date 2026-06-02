@@ -1,5 +1,9 @@
 # Card Changelog
 
+## 0.8.0
+- Added an optional fullscreen touchpad mode with native Fullscreen API support and a card-level fallback for mobile WebViews.
+- Repositioned the status text, keyboard toggle, and fullscreen button for a cleaner fullscreen/mobile layout.
+
 ## 0.7.0
 - Added optional webOS app launcher buttons, configurable from the card editor or YAML.
 - Dim unavailable webOS app buttons when the bridge can read the TV app list, with a launch-failure message fallback.

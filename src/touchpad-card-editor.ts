@@ -19,6 +19,7 @@ type BooleanOptionField =
   | 'show_status_text'
   | 'show_audio_controls'
   | 'show_keyboard_button'
+  | 'show_fullscreen_button'
   | 'show_app_buttons'
   | 'auto_focus_keyboard'
   | 'invert_scroll';
@@ -31,6 +32,7 @@ const BOOLEAN_DEFAULTS: Record<BooleanOptionField, boolean> = {
   show_status_text: true,
   show_audio_controls: true,
   show_keyboard_button: true,
+  show_fullscreen_button: true,
   show_app_buttons: false,
   auto_focus_keyboard: true,
   invert_scroll: false,
@@ -49,6 +51,7 @@ const BOOLEAN_FIELDS: Array<{ field: BooleanOptionField; label: string }> = [
   { field: 'show_status_text', label: 'Show status text' },
   { field: 'show_audio_controls', label: 'Show audio icons' },
   { field: 'show_keyboard_button', label: 'Show keyboard toggle' },
+  { field: 'show_fullscreen_button', label: 'Show fullscreen button' },
   { field: 'show_app_buttons', label: 'Show webOS app buttons' },
   { field: 'auto_focus_keyboard', label: 'Focus keyboard input when opened' },
   { field: 'invert_scroll', label: 'Reverse scroll direction' },
@@ -649,6 +652,7 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
       show_status_text: device.show_status_text,
       show_audio_controls: device.show_audio_controls,
       show_keyboard_button: device.show_keyboard_button,
+      show_fullscreen_button: device.show_fullscreen_button,
       show_app_buttons: device.show_app_buttons,
       auto_focus_keyboard: device.auto_focus_keyboard,
       webos_apps: device.webos_apps,
@@ -698,6 +702,7 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
       show_status_text: BOOLEAN_DEFAULTS.show_status_text,
       show_audio_controls: BOOLEAN_DEFAULTS.show_audio_controls,
       show_keyboard_button: BOOLEAN_DEFAULTS.show_keyboard_button,
+      show_fullscreen_button: BOOLEAN_DEFAULTS.show_fullscreen_button,
       show_app_buttons: BOOLEAN_DEFAULTS.show_app_buttons,
       auto_focus_keyboard: BOOLEAN_DEFAULTS.auto_focus_keyboard,
       invert_scroll: BOOLEAN_DEFAULTS.invert_scroll,
@@ -710,6 +715,7 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
     target.show_status_text = source.show_status_text ?? BOOLEAN_DEFAULTS.show_status_text;
     target.show_audio_controls = source.show_audio_controls ?? BOOLEAN_DEFAULTS.show_audio_controls;
     target.show_keyboard_button = source.show_keyboard_button ?? BOOLEAN_DEFAULTS.show_keyboard_button;
+    target.show_fullscreen_button = source.show_fullscreen_button ?? BOOLEAN_DEFAULTS.show_fullscreen_button;
     target.show_app_buttons = source.show_app_buttons ?? BOOLEAN_DEFAULTS.show_app_buttons;
     target.auto_focus_keyboard = source.auto_focus_keyboard ?? BOOLEAN_DEFAULTS.auto_focus_keyboard;
     target.webos_apps = source.webos_apps?.map((app) => ({ ...app }));

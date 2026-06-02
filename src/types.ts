@@ -22,6 +22,7 @@ export interface TouchpadOptionConfig {
   show_status_text?: boolean;
   show_audio_controls?: boolean;
   show_keyboard_button?: boolean;
+  show_fullscreen_button?: boolean;
   show_app_buttons?: boolean;
   auto_focus_keyboard?: boolean;
   webos_apps?: WebOSAppConfig[];

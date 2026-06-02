@@ -31,6 +31,17 @@ interface LockedPanState {
   lastY: number;
 }
 
+type FullscreenMode = 'native' | 'soft' | null;
+
+type FullscreenCapableElement = HTMLElement & {
+  webkitRequestFullscreen?: () => Promise<void> | void;
+};
+
+type FullscreenCapableDocument = Document & {
+  webkitFullscreenElement?: Element | null;
+  webkitExitFullscreen?: () => Promise<void> | void;
+};
+
 interface ResolvedTouchpadDevice extends TouchpadDeviceConfig {
   id: string;
   name: string;
@@ -51,6 +62,7 @@ interface TouchpadRuntimeOptions {
   showStatusText: boolean;
   showAudioControls: boolean;
   showKeyboardButton: boolean;
+  showFullscreenButton: boolean;
   showAppButtons: boolean;
   autoFocusKeyboard: boolean;
   webosApps: WebOSAppConfig[];
@@ -113,6 +125,7 @@ const DEFAULTS = {
   showStatusText: true,
   showAudioControls: true,
   showKeyboardButton: true,
+  showFullscreenButton: true,
   showAppButtons: false,
   autoFocusKeyboard: true,
 };
@@ -131,6 +144,7 @@ export class TouchpadCard extends LitElement {
   @state() private _locked = false;
   @state() private _speedMultiplier: 1 | 2 | 3 | 4 = 1;
   @state() private _keyboardOpen = false;
+  @state() private _fullscreenActive = false;
   @state() private _availableAppIds?: Set<string>;
   @state() private _unavailableAppIds = new Set<string>();
   @state() private _appNotice?: string;
@@ -144,6 +158,7 @@ export class TouchpadCard extends LitElement {
   private wsErrorNotified = false;
   private reconnectDelayMs = RECONNECT_BASE_MS;
   private socketGeneration = 0;
+  private fullscreenMode: FullscreenMode = null;
 
   private pointers = new Map<number, PointerState>();
   private gesture: PointerGesture = null;
@@ -168,6 +183,7 @@ export class TouchpadCard extends LitElement {
     showStatusText: DEFAULTS.showStatusText,
     showAudioControls: DEFAULTS.showAudioControls,
     showKeyboardButton: DEFAULTS.showKeyboardButton,
+    showFullscreenButton: DEFAULTS.showFullscreenButton,
     showAppButtons: DEFAULTS.showAppButtons,
     autoFocusKeyboard: DEFAULTS.autoFocusKeyboard,
     webosApps: DEFAULT_WEBOS_APPS,
@@ -189,6 +205,7 @@ export class TouchpadCard extends LitElement {
       show_status_text: DEFAULTS.showStatusText,
       show_audio_controls: DEFAULTS.showAudioControls,
       show_keyboard_button: DEFAULTS.showKeyboardButton,
+      show_fullscreen_button: DEFAULTS.showFullscreenButton,
       show_app_buttons: DEFAULTS.showAppButtons,
       auto_focus_keyboard: DEFAULTS.autoFocusKeyboard,
     };
@@ -213,6 +230,8 @@ export class TouchpadCard extends LitElement {
 
   public connectedCallback(): void {
     super.connectedCallback();
+    document.addEventListener('fullscreenchange', this.handleFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', this.handleFullscreenChange);
     if (this.detachTimer) {
       clearTimeout(this.detachTimer);
       this.detachTimer = undefined;
@@ -224,6 +243,8 @@ export class TouchpadCard extends LitElement {
 
   public disconnectedCallback(): void {
     super.disconnectedCallback();
+    document.removeEventListener('fullscreenchange', this.handleFullscreenChange);
+    document.removeEventListener('webkitfullscreenchange', this.handleFullscreenChange);
     if (this.tapTimer) {
       clearTimeout(this.tapTimer);
       this.tapTimer = undefined;
@@ -290,6 +311,7 @@ export class TouchpadCard extends LitElement {
       showStatusText: device?.show_status_text ?? config.show_status_text ?? DEFAULTS.showStatusText,
       showAudioControls: device?.show_audio_controls ?? config.show_audio_controls ?? DEFAULTS.showAudioControls,
       showKeyboardButton: device?.show_keyboard_button ?? config.show_keyboard_button ?? DEFAULTS.showKeyboardButton,
+      showFullscreenButton: device?.show_fullscreen_button ?? config.show_fullscreen_button ?? DEFAULTS.showFullscreenButton,
       showAppButtons: device?.show_app_buttons ?? config.show_app_buttons ?? DEFAULTS.showAppButtons,
       autoFocusKeyboard: device?.auto_focus_keyboard ?? config.auto_focus_keyboard ?? DEFAULTS.autoFocusKeyboard,
       webosApps: normalizeWebOSApps(webosApps ?? DEFAULT_WEBOS_APPS),
@@ -348,6 +370,7 @@ export class TouchpadCard extends LitElement {
         show_status_text: config.show_status_text,
         show_audio_controls: config.show_audio_controls,
         show_keyboard_button: config.show_keyboard_button,
+        show_fullscreen_button: config.show_fullscreen_button,
         show_app_buttons: config.show_app_buttons,
         auto_focus_keyboard: config.auto_focus_keyboard,
         webos_apps: config.webos_apps,
@@ -378,6 +401,9 @@ export class TouchpadCard extends LitElement {
     }
     if (!this.opts.showSpeedButtons) {
       this._speedMultiplier = 1;
+    }
+    if (!this.opts.showFullscreenButton && this._fullscreenActive) {
+      void this.exitFullscreen();
     }
   }
 
@@ -1148,6 +1174,96 @@ export class TouchpadCard extends LitElement {
     }
   }
 
+  private currentFullscreenElement(): Element | null {
+    const fullscreenDocument = document as FullscreenCapableDocument;
+    return document.fullscreenElement ?? fullscreenDocument.webkitFullscreenElement ?? null;
+  }
+
+  private requestNativeFullscreen(): Promise<void> | null {
+    const target = this as FullscreenCapableElement;
+    if (target.requestFullscreen) {
+      return target.requestFullscreen();
+    }
+    if (target.webkitRequestFullscreen) {
+      return Promise.resolve(target.webkitRequestFullscreen());
+    }
+    return null;
+  }
+
+  private exitNativeFullscreen(): Promise<void> | null {
+    const fullscreenDocument = document as FullscreenCapableDocument;
+    if (document.exitFullscreen) {
+      return document.exitFullscreen();
+    }
+    if (fullscreenDocument.webkitExitFullscreen) {
+      return Promise.resolve(fullscreenDocument.webkitExitFullscreen());
+    }
+    return null;
+  }
+
+  private handleFullscreenChange = (): void => {
+    const fullscreenElement = this.currentFullscreenElement();
+    const ownsFullscreen =
+      fullscreenElement === this || Boolean(fullscreenElement && (this.contains(fullscreenElement) || this.renderRoot.contains(fullscreenElement)));
+
+    if (ownsFullscreen || (fullscreenElement && this.fullscreenMode === 'native')) {
+      this.fullscreenMode = 'native';
+      this._fullscreenActive = true;
+      return;
+    }
+
+    if (this.fullscreenMode === 'native') {
+      this.fullscreenMode = null;
+      this._fullscreenActive = false;
+    }
+  };
+
+  private enterFullscreen = async (): Promise<void> => {
+    if (this._fullscreenActive) return;
+
+    this.resetInteractionState();
+    const nativeRequest = this.requestNativeFullscreen();
+    if (nativeRequest) {
+      this.fullscreenMode = 'native';
+      try {
+        await nativeRequest;
+        this._fullscreenActive = true;
+        return;
+      } catch (err) {
+        this.fullscreenMode = null;
+        logCardWarn('Native fullscreen request failed; using card fullscreen fallback.', err);
+      }
+    }
+
+    this.fullscreenMode = 'soft';
+    this._fullscreenActive = true;
+  };
+
+  private exitFullscreen = async (): Promise<void> => {
+    if (!this._fullscreenActive) return;
+
+    this.resetInteractionState();
+    const hasNativeFullscreen = Boolean(this.currentFullscreenElement()) || this.fullscreenMode === 'native';
+    this.fullscreenMode = null;
+    this._fullscreenActive = false;
+
+    if (hasNativeFullscreen) {
+      const nativeExit = this.exitNativeFullscreen();
+      if (nativeExit) {
+        try {
+          await nativeExit;
+        } catch (err) {
+          logCardWarn('Native fullscreen exit failed.', err);
+        }
+      }
+    }
+  };
+
+  private toggleFullscreen = (ev: Event): void => {
+    ev.stopPropagation();
+    void (this._fullscreenActive ? this.exitFullscreen() : this.enterFullscreen());
+  };
+
   private toggleLock = (): void => {
     if (!this._locked && this.dragPointerId != null) {
       this.sendButton('up');
@@ -1244,6 +1360,7 @@ export class TouchpadCard extends LitElement {
     const isWebos = this.opts.controlsProfile === 'webos';
     const showAppLauncher = isWebos && this.opts.showAppButtons && this.opts.webosApps.length > 0;
     const themeClass = `theme-${this.effectiveThemeMode()}`;
+    const cardClass = `${themeClass} ${this._fullscreenActive ? 'fullscreen' : ''}`;
     const keyboardPlaceholder = isWebos ? 'Tap to type on TV' : 'Tap to type on PC';
     const leftButtons = isWebos
       ? [
@@ -1270,7 +1387,7 @@ export class TouchpadCard extends LitElement {
     ];
 
     return html`
-      <ha-card class=${themeClass} @contextmenu=${(e: Event) => e.preventDefault()}>
+      <ha-card class=${cardClass} @contextmenu=${(e: Event) => e.preventDefault()}>
         ${showDeviceTabs
           ? html`<div class="device-tabs" role="tablist">
               ${this._devices.map(
@@ -1340,6 +1457,18 @@ export class TouchpadCard extends LitElement {
                 @click=${this.toggleKeyboardPanel}
               >
                 <ha-icon icon="mdi:keyboard-outline"></ha-icon>
+              </button>`
+            : nothing}
+          ${this.opts.showFullscreenButton
+            ? html`<button
+                class="fullscreen-toggle ${this._fullscreenActive ? 'active' : ''}"
+                type="button"
+                title=${this._fullscreenActive ? 'Exit fullscreen' : 'Fullscreen'}
+                @pointerdown=${(e: Event) => e.stopPropagation()}
+                @pointerup=${(e: Event) => e.stopPropagation()}
+                @click=${this.toggleFullscreen}
+              >
+                <ha-icon icon=${this._fullscreenActive ? 'mdi:fullscreen-exit' : 'mdi:fullscreen'}></ha-icon>
               </button>`
             : nothing}
           <div
@@ -1427,8 +1556,30 @@ export class TouchpadCard extends LitElement {
       --arrow-cluster-width: calc(var(--arrow-size) * 3 + var(--arrow-gap) * 2);
     }
 
+    :host(:fullscreen) {
+      width: 100vw;
+      height: 100vh;
+      height: 100dvh;
+      background: var(--tp-panel-bg);
+    }
+
     ha-card {
       overflow: hidden;
+    }
+
+    ha-card.fullscreen,
+    :host(:fullscreen) ha-card {
+      position: fixed;
+      inset: 0;
+      z-index: 2147483647;
+      width: 100vw;
+      height: 100vh;
+      height: 100dvh;
+      display: flex;
+      flex-direction: column;
+      box-sizing: border-box;
+      border-radius: 0;
+      background: var(--tp-panel-bg);
     }
 
     ha-card.theme-dark {
@@ -1540,6 +1691,14 @@ export class TouchpadCard extends LitElement {
       touch-action: none;
     }
 
+    ha-card.fullscreen .surface,
+    :host(:fullscreen) .surface {
+      flex: 1 1 auto;
+      min-height: 0;
+      height: auto;
+      border-radius: 0;
+    }
+
     .surface.with-device-tabs {
       border-top-left-radius: 0;
       border-top-right-radius: 0;
@@ -1592,10 +1751,12 @@ export class TouchpadCard extends LitElement {
 
     .status {
       position: absolute;
-      left: 14px;
+      right: 14px;
       bottom: 12px;
+      max-width: calc(100% - 92px);
       font-size: 13px;
       color: var(--tp-subtle-text);
+      text-align: right;
       text-shadow: 0 1px 2px var(--tp-status-shadow);
       pointer-events: none;
     }
@@ -1665,8 +1826,7 @@ export class TouchpadCard extends LitElement {
     .keyboard-toggle {
       position: absolute;
       left: 12px;
-      top: 50%;
-      transform: translateY(-50%);
+      bottom: 12px;
       z-index: 3;
       width: 44px;
       height: 44px;
@@ -1692,8 +1852,58 @@ export class TouchpadCard extends LitElement {
       border-color: var(--tp-accent-border);
       box-shadow: 0 0 0 1px var(--tp-accent-ring);
     }
+
+    .fullscreen-toggle {
+      position: absolute;
+      left: 12px;
+      top: 50%;
+      transform: translateY(-50%);
+      z-index: 3;
+      width: 44px;
+      height: 44px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 14px;
+      border: 1px solid var(--tp-border-medium);
+      background: var(--tp-control-bg-strong);
+      color: var(--tp-muted-text);
+      cursor: pointer;
+      font-size: 17px;
+      transition: all 140ms ease;
+    }
+
+    .fullscreen-toggle:hover {
+      border-color: var(--tp-border-strong);
+      color: var(--tp-strong-text);
+    }
+
+    .fullscreen-toggle.active {
+      color: var(--tp-accent);
+      border-color: var(--tp-accent-border);
+      box-shadow: 0 0 0 1px var(--tp-accent-ring);
+    }
+
+    ha-card.fullscreen .fullscreen-toggle,
+    :host(:fullscreen) .fullscreen-toggle {
+      left: max(12px, env(safe-area-inset-left));
+    }
+
+    ha-card.fullscreen .keyboard-toggle,
+    :host(:fullscreen) .keyboard-toggle {
+      left: max(12px, env(safe-area-inset-left));
+      bottom: max(12px, env(safe-area-inset-bottom));
+    }
+
+    ha-card.fullscreen .status,
+    :host(:fullscreen) .status {
+      right: max(14px, env(safe-area-inset-right));
+      bottom: max(12px, env(safe-area-inset-bottom));
+    }
+
     .icon-btn ha-icon,
-    .keyboard-toggle ha-icon {
+    .keyboard-toggle ha-icon,
+    .fullscreen-toggle ha-icon {
       width: 20px;
       height: 20px;
       display: flex;
@@ -1717,6 +1927,16 @@ export class TouchpadCard extends LitElement {
     .app-strip.with-keyboard {
       border-bottom-left-radius: 0;
       border-bottom-right-radius: 0;
+    }
+    ha-card.fullscreen .app-strip,
+    :host(:fullscreen) .app-strip {
+      flex: 0 0 auto;
+      max-height: 28vh;
+      max-height: 28dvh;
+      overflow-y: auto;
+      border-radius: 0;
+      padding-right: max(14px, env(safe-area-inset-right));
+      padding-left: max(14px, env(safe-area-inset-left));
     }
     .app-btn {
       flex: 0 1 auto;
@@ -1796,6 +2016,17 @@ export class TouchpadCard extends LitElement {
       border-top: 1px solid var(--tp-divider);
       border-bottom-left-radius: 12px;
       border-bottom-right-radius: 12px;
+    }
+    ha-card.fullscreen .controls,
+    :host(:fullscreen) .controls {
+      flex: 0 0 auto;
+      max-height: 42vh;
+      max-height: 42dvh;
+      overflow-y: auto;
+      border-radius: 0;
+      padding-right: max(14px, env(safe-area-inset-right));
+      padding-bottom: max(14px, env(safe-area-inset-bottom));
+      padding-left: max(14px, env(safe-area-inset-left));
     }
     .left-panel {
       flex: 1 1 0;
