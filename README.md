@@ -5,24 +5,21 @@
 
 # Lovelace Touchpad Card
 
-Control your PC or LG webOS TV from Home Assistant with a touchpad, keyboard input, and volume controls.
+Control your PC or LG webOS TV from Home Assistant with a touchpad, keyboard, volume controls, and gestures for devices or Home Assistant actions.
 
 If you like this project, please consider giving it a ⭐ on GitHub: [![Star on GitHub](https://img.shields.io/github/stars/michalowskil/lovelace-touchpad-card.svg?style=social)](https://github.com/michalowskil/lovelace-touchpad-card/stargazers)
 
-## Features & gestures
-- One-finger move; tap/double-tap = left/double click; press-and-hold then drag to select/drag.
-- Two-finger scroll with configurable multiplier.
-- Two-finger short tap = right click.
-- Optional Gesture mode maps swipe, tap, and hold gestures to configured key or volume actions.
-- Keyboard panel for text input plus arrows/Home/End/PageUp/PageDown.
-- Built-in volume controls (up/down/mute).
-- Optional webOS app launcher buttons for services such as Netflix, Disney+, YouTube, and Prime Video.
-- Speed toggles x2/x3/x4 (one active at a time).
-- Optional multi-device mode with quick switching between configured endpoints.
-- Remembers selected toggles (speed, lock, keyboard panel, app launcher, gesture mode) per device and dashboard view.
-- Works over LAN WebSocket (`ws://...`); switch to `wss://` for remote.
+## Features
+
+- Touchpad control for PC or LG webOS TV, including pointer movement, clicks, scrolling, and drag/select.
+- Keyboard panel, volume controls, speed presets, lock mode, fullscreen mode, and optional webOS app launcher.
+- Two gesture modes: device gestures for PC/TV commands, and Home Assistant gestures for `perform-action` actions.
+- Multi-device support with per-device/view UI state.
+- LAN or remote WebSocket connection with `ws://` or `wss://`.
 
 ## Installation
+
+Choose one installation method, via [HACS](https://www.hacs.xyz/docs/use/download/download/) or manually.
 
 ### HACS – Custom repository
 1. HACS → ⋮ → **Custom repositories** → add  
@@ -90,6 +87,27 @@ Default mappings are:
 - Hold: Back on LG webOS controls, Escape on PC controls.
 
 Each gesture can be changed in the editor. Available actions include arrows, Enter/OK, Escape, Home/End, Page Up/Page Down, and volume actions. LG webOS controls also expose Back, Power, and Settings. Use **Reverse swipe directions** if your TV/app navigation feels inverted.
+
+## Home Assistant gesture mode
+
+Enable **Show Home Assistant gesture mode button** in the **Home Assistant gesture controls** editor section to add a second gesture toggle. This mode uses the same swipe/tap/hold detection, but executes the configured Home Assistant/Lovelace action instead of sending keys to the PC/TV backend.
+
+Each gesture uses Home Assistant's UI action selector, so you can configure service/action calls with targets and data from the visual editor. The saved YAML uses `ha_gesture_mode`:
+
+```yaml
+ha_gesture_mode:
+  show_button: true
+  tap:
+    action: perform-action
+    perform_action: light.toggle
+    target:
+      entity_id: light.living_room
+  hold:
+    action: perform-action
+    perform_action: script.turn_on
+    target:
+      entity_id: script.movie_mode
+```
 
 ## Optional webOS App Button
 
@@ -173,7 +191,7 @@ Example with the **NGINX Home Assistant SSL proxy** add-on:
 For remote access, you only need to expose your HTTPS port (usually `443`) to the internet. Do not expose backend ports (for example `8765` or `8778`) directly unless you understand the risk: these WebSocket backends do not add their own login screen.
 
 ## Changelog
-- **Card (frontend):** latest v0.9.0 — see [CHANGELOG.md](CHANGELOG.md). Highlights: configurable Gesture mode plus remembered webOS app toggle button for configured app shortcuts.
+- **Card (frontend):** latest v0.10.0 — see [CHANGELOG.md](CHANGELOG.md). Highlights: Added Home Assistant gesture mode with a separate touchpad toggle and visual-editor configurable actions.
 - **Windows backend:** latest v0.5.1 — see [backend/CHANGELOG.md](backend/CHANGELOG.md). Highlights: tray update checks now track the Windows backend version, so card-only releases do not notify Windows users.
 - **webOS add-on:** latest v0.4.0 — see [addon/webos-pointer-bridge/CHANGELOG.md](addon/webos-pointer-bridge/CHANGELOG.md). Highlights: app launch support plus installed-app reporting for the card editor picker.
 

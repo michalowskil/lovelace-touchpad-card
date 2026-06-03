@@ -7,6 +7,8 @@ import {
   TouchpadControlsProfile,
   TouchpadDeviceConfig,
   TouchpadGestureAction,
+  TouchpadHAGestureAction,
+  TouchpadHAGestureModeConfig,
   TouchpadGestureModeConfig,
   TouchpadMessage,
   TouchpadServerMessage,
@@ -70,6 +72,7 @@ interface TouchpadRuntimeOptions {
   showAppButtons: boolean;
   autoFocusKeyboard: boolean;
   gestureMode: Required<TouchpadGestureModeConfig>;
+  haGestureMode: Required<TouchpadHAGestureModeConfig>;
   webosApps: WebOSAppConfig[];
 }
 
@@ -79,6 +82,7 @@ interface PersistedDeviceUiState {
   keyboardOpen?: boolean;
   appLauncherOpen?: boolean;
   gestureModeActive?: boolean;
+  haGestureModeActive?: boolean;
 }
 
 interface PersistedUiState extends PersistedDeviceUiState {
@@ -175,6 +179,19 @@ function defaultGestureMode(profile: TouchpadControlsProfile): Required<Touchpad
   };
 }
 
+function defaultHAGestureMode(): Required<TouchpadHAGestureModeConfig> {
+  return {
+    show_button: false,
+    invert_swipes: false,
+    swipe_left: { action: 'none' },
+    swipe_right: { action: 'none' },
+    swipe_up: { action: 'none' },
+    swipe_down: { action: 'none' },
+    tap: { action: 'none' },
+    hold: { action: 'none' },
+  };
+}
+
 function createStorageId(): string {
   return `tp_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
 }
@@ -192,6 +209,7 @@ export class TouchpadCard extends LitElement {
   @state() private _appLauncherOpen = false;
   @state() private _fullscreenActive = false;
   @state() private _gestureModeActive = false;
+  @state() private _haGestureModeActive = false;
   @state() private _availableAppIds?: Set<string>;
   @state() private _unavailableAppIds = new Set<string>();
   @state() private _appNotice?: string;
@@ -235,6 +253,7 @@ export class TouchpadCard extends LitElement {
     showAppButtons: DEFAULTS.showAppButtons,
     autoFocusKeyboard: DEFAULTS.autoFocusKeyboard,
     gestureMode: defaultGestureMode(DEFAULTS.controlsProfile),
+    haGestureMode: defaultHAGestureMode(),
     webosApps: DEFAULT_WEBOS_APPS,
   };
 
@@ -272,6 +291,7 @@ export class TouchpadCard extends LitElement {
     this._keyboardOpen = false;
     this._appLauncherOpen = false;
     this._gestureModeActive = false;
+    this._haGestureModeActive = false;
     this._speedMultiplier = 1;
     this.restoreUiState();
     this.applyActiveDeviceOptions();
@@ -352,6 +372,23 @@ export class TouchpadCard extends LitElement {
     return GESTURE_ACTIONS.has(normalized) ? normalized : fallback;
   }
 
+  private normalizeHAGestureAction(action: unknown): TouchpadHAGestureAction {
+    if (action && typeof action === 'object') {
+      return this.deepClone(action) as TouchpadHAGestureAction;
+    }
+    return { action: 'none' };
+  }
+
+  private deepClone(value: unknown): unknown {
+    if (Array.isArray(value)) {
+      return value.map((item) => this.deepClone(item));
+    }
+    if (value && typeof value === 'object') {
+      return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, item]) => [key, this.deepClone(item)]));
+    }
+    return value;
+  }
+
   private resolveGestureMode(
     config: TouchpadCardConfig,
     device: TouchpadDeviceConfig | undefined,
@@ -371,6 +408,23 @@ export class TouchpadCard extends LitElement {
       swipe_down: this.normalizeGestureAction(local.swipe_down ?? root.swipe_down, defaults.swipe_down),
       tap: this.normalizeGestureAction(local.tap ?? root.tap, defaults.tap),
       hold: this.normalizeGestureAction(local.hold ?? root.hold, defaults.hold),
+    };
+  }
+
+  private resolveHAGestureMode(config: TouchpadCardConfig, device: TouchpadDeviceConfig | undefined): Required<TouchpadHAGestureModeConfig> {
+    const defaults = defaultHAGestureMode();
+    const root = config.ha_gesture_mode ?? {};
+    const local = device?.ha_gesture_mode ?? {};
+
+    return {
+      show_button: local.show_button ?? root.show_button ?? defaults.show_button,
+      invert_swipes: local.invert_swipes ?? root.invert_swipes ?? defaults.invert_swipes,
+      swipe_left: this.normalizeHAGestureAction(local.swipe_left ?? root.swipe_left),
+      swipe_right: this.normalizeHAGestureAction(local.swipe_right ?? root.swipe_right),
+      swipe_up: this.normalizeHAGestureAction(local.swipe_up ?? root.swipe_up),
+      swipe_down: this.normalizeHAGestureAction(local.swipe_down ?? root.swipe_down),
+      tap: this.normalizeHAGestureAction(local.tap ?? root.tap),
+      hold: this.normalizeHAGestureAction(local.hold ?? root.hold),
     };
   }
 
@@ -396,6 +450,7 @@ export class TouchpadCard extends LitElement {
       showAppButtons: device?.show_app_buttons ?? config.show_app_buttons ?? DEFAULTS.showAppButtons,
       autoFocusKeyboard: device?.auto_focus_keyboard ?? config.auto_focus_keyboard ?? DEFAULTS.autoFocusKeyboard,
       gestureMode: this.resolveGestureMode(config, device, controlsProfile),
+      haGestureMode: this.resolveHAGestureMode(config, device),
       webosApps: normalizeWebOSApps(webosApps ?? DEFAULT_WEBOS_APPS),
     };
   }
@@ -456,6 +511,7 @@ export class TouchpadCard extends LitElement {
         show_app_buttons: config.show_app_buttons,
         auto_focus_keyboard: config.auto_focus_keyboard,
         gesture_mode: config.gesture_mode,
+        ha_gesture_mode: config.ha_gesture_mode,
         webos_apps: config.webos_apps,
       },
     ];
@@ -490,6 +546,9 @@ export class TouchpadCard extends LitElement {
     }
     if (!this.opts.gestureMode.show_button) {
       this._gestureModeActive = false;
+    }
+    if (!this.opts.haGestureMode.show_button) {
+      this._haGestureModeActive = false;
     }
     if (!this.opts.showFullscreenButton && this._fullscreenActive) {
       void this.exitFullscreen();
@@ -757,6 +816,7 @@ export class TouchpadCard extends LitElement {
     this._keyboardOpen = false;
     this._appLauncherOpen = false;
     this._gestureModeActive = false;
+    this._haGestureModeActive = false;
   }
 
   private restoreDeviceUiState(parsed: PersistedUiState | null = this.loadPersistedUiState()): void {
@@ -768,7 +828,8 @@ export class TouchpadCard extends LitElement {
         this.isSpeedMultiplier(parsed.speedMultiplier) ||
         typeof parsed.keyboardOpen === 'boolean' ||
         typeof parsed.appLauncherOpen === 'boolean' ||
-        typeof parsed.gestureModeActive === 'boolean')
+        typeof parsed.gestureModeActive === 'boolean' ||
+        typeof parsed.haGestureModeActive === 'boolean')
         ? parsed
         : undefined;
     const state = deviceState ?? legacyState;
@@ -788,6 +849,12 @@ export class TouchpadCard extends LitElement {
     }
     if (typeof state?.gestureModeActive === 'boolean') {
       this._gestureModeActive = state.gestureModeActive;
+    }
+    if (typeof state?.haGestureModeActive === 'boolean') {
+      this._haGestureModeActive = state.haGestureModeActive;
+    }
+    if (this._gestureModeActive && this._haGestureModeActive) {
+      this._haGestureModeActive = false;
     }
     this.applyActiveDeviceOptions();
   }
@@ -826,6 +893,7 @@ export class TouchpadCard extends LitElement {
           keyboardOpen: this.opts.showKeyboardButton ? this._keyboardOpen : false,
           appLauncherOpen: this.canShowAppLauncherToggle() ? this._appLauncherOpen : false,
           gestureModeActive: this.opts.gestureMode.show_button ? this._gestureModeActive : false,
+          haGestureModeActive: this.opts.haGestureMode.show_button ? this._haGestureModeActive : false,
         };
       }
 
@@ -864,12 +932,16 @@ export class TouchpadCard extends LitElement {
     return this.renderRoot.querySelector('.capture');
   }
 
+  private gestureModeActive(): boolean {
+    return this._gestureModeActive || this._haGestureModeActive;
+  }
+
   private handlePointerDown = (ev: PointerEvent): void => {
     if (this._locked) {
       this.startLockedPan(ev);
       return;
     }
-    if (this._gestureModeActive) {
+    if (this.gestureModeActive()) {
       this.startGestureModePointer(ev);
       return;
     }
@@ -901,7 +973,7 @@ export class TouchpadCard extends LitElement {
       this.moveLockedPan(ev);
       return;
     }
-    if (this._gestureModeActive) {
+    if (this.gestureModeActive()) {
       this.moveGestureModePointer(ev);
       return;
     }
@@ -945,7 +1017,7 @@ export class TouchpadCard extends LitElement {
       this.endLockedPan(ev);
       return;
     }
-    if (this._gestureModeActive) {
+    if (this.gestureModeActive()) {
       this.endGestureModePointer(ev);
       return;
     }
@@ -1012,7 +1084,7 @@ export class TouchpadCard extends LitElement {
       this.endLockedPan(ev);
       return;
     }
-    if (this._gestureModeActive) {
+    if (this.gestureModeActive()) {
       this.cancelGestureModePointer(ev);
       return;
     }
@@ -1130,7 +1202,8 @@ export class TouchpadCard extends LitElement {
 
     const direction: GestureDirection =
       Math.abs(dx) >= Math.abs(dy) ? (dx < 0 ? 'swipe_left' : 'swipe_right') : dy < 0 ? 'swipe_up' : 'swipe_down';
-    return this.opts.gestureMode.invert_swipes ? this.invertedGestureDirection(direction) : direction;
+    const invertSwipes = this._haGestureModeActive ? this.opts.haGestureMode.invert_swipes : this.opts.gestureMode.invert_swipes;
+    return invertSwipes ? this.invertedGestureDirection(direction) : direction;
   }
 
   private invertedGestureDirection(direction: GestureDirection): GestureDirection {
@@ -1147,6 +1220,10 @@ export class TouchpadCard extends LitElement {
   }
 
   private executeGesture(eventName: GestureEventName): void {
+    if (this._haGestureModeActive) {
+      this.executeHAGesture(eventName);
+      return;
+    }
     this.executeGestureAction(this.opts.gestureMode[eventName]);
   }
 
@@ -1166,6 +1243,73 @@ export class TouchpadCard extends LitElement {
       default:
         this.sendKey(action);
     }
+  }
+
+  private executeHAGesture(eventName: GestureEventName): void {
+    const action = this.opts.haGestureMode[eventName];
+    if (!this.hasHAGestureAction(action)) {
+      return;
+    }
+    if (!this.hass) {
+      logCardWarn('Cannot execute Home Assistant gesture action because hass is not available.');
+      return;
+    }
+
+    void this.executeHAAction(action).catch((err) => {
+      logCardError('Failed to execute Home Assistant gesture action.', err);
+    });
+  }
+
+  private hasHAGestureAction(action: TouchpadHAGestureAction | undefined): boolean {
+    if (!action || typeof action !== 'object') {
+      return false;
+    }
+    const type = String(action.action ?? '').trim();
+    return Boolean(type) && type !== 'none';
+  }
+
+  private async executeHAAction(action: TouchpadHAGestureAction): Promise<void> {
+    const type = String(action.action ?? '').trim();
+    if (type === 'perform-action' || type === 'perform_action') {
+      await this.executeHAPerformAction(action.perform_action ?? action.performAction ?? action.service, action.target, action.data ?? action.service_data);
+      return;
+    }
+  }
+
+  private async executeHAPerformAction(
+    performAction: unknown,
+    outerTarget: unknown,
+    outerData: unknown
+  ): Promise<void> {
+    const action =
+      performAction && typeof performAction === 'object'
+        ? (performAction as Record<string, unknown>)
+        : { service: performAction };
+    const serviceName = String(action.service ?? action.action ?? performAction ?? '');
+    const target = action.target ?? outerTarget;
+    const data = action.data ?? action.service_data ?? outerData;
+
+    if (serviceName === 'toggle') {
+      await this.callHAService('homeassistant.toggle', undefined, target);
+      return;
+    }
+
+    await this.callHAService(serviceName, data, target);
+  }
+
+  private async callHAService(serviceName: string, data: unknown, target: unknown): Promise<void> {
+    if (!this.hass) {
+      return;
+    }
+    const [domain, service] = serviceName.split('.', 2);
+    if (!domain || !service) {
+      logCardWarn('Cannot execute Home Assistant gesture action because service name is invalid.', serviceName);
+      return;
+    }
+
+    const serviceData = data && typeof data === 'object' ? (data as Record<string, unknown>) : undefined;
+    const serviceTarget = target && typeof target === 'object' ? (target as Record<string, unknown>) : undefined;
+    await this.hass.callService(domain, service, serviceData, serviceTarget);
   }
 
   private startLockedPan(ev: PointerEvent): void {
@@ -1548,6 +1692,7 @@ export class TouchpadCard extends LitElement {
     this._locked = !this._locked;
     if (this._locked) {
       this._gestureModeActive = false;
+      this._haGestureModeActive = false;
     }
     this.persistUiState();
   };
@@ -1579,6 +1724,23 @@ export class TouchpadCard extends LitElement {
       this._locked = false;
     }
     this._gestureModeActive = !this._gestureModeActive;
+    if (this._gestureModeActive) {
+      this._haGestureModeActive = false;
+    }
+    this.persistUiState();
+  };
+
+  private toggleHAGestureMode = (ev: Event): void => {
+    ev.stopPropagation();
+    if (!this.opts.haGestureMode.show_button) return;
+    this.resetInteractionState();
+    if (!this._haGestureModeActive && this._locked) {
+      this._locked = false;
+    }
+    this._haGestureModeActive = !this._haGestureModeActive;
+    if (this._haGestureModeActive) {
+      this._gestureModeActive = false;
+    }
     this.persistUiState();
   };
 
@@ -1771,31 +1933,45 @@ export class TouchpadCard extends LitElement {
                 <ha-icon icon="mdi:apps"></ha-icon>
               </button>`
             : nothing}
-          ${this.opts.showFullscreenButton
-            ? html`<button
-                class="fullscreen-toggle ${this._fullscreenActive ? 'active' : ''}"
-                type="button"
-                title=${this._fullscreenActive ? 'Exit fullscreen' : 'Fullscreen'}
-                @pointerdown=${(e: Event) => e.stopPropagation()}
-                @pointerup=${(e: Event) => e.stopPropagation()}
-                @click=${this.toggleFullscreen}
-              >
-                <ha-icon icon=${this._fullscreenActive ? 'mdi:fullscreen-exit' : 'mdi:fullscreen'}></ha-icon>
-              </button>`
-            : nothing}
-          ${this.opts.gestureMode.show_button
-            ? html`<button
-                class="gesture-toggle ${this._gestureModeActive ? 'active' : ''} ${this.opts.showFullscreenButton
-                  ? 'with-fullscreen-toggle'
-                  : ''}"
-                type="button"
-                title=${this._gestureModeActive ? 'Exit gesture mode' : 'Gesture mode'}
-                @pointerdown=${(e: Event) => e.stopPropagation()}
-                @pointerup=${(e: Event) => e.stopPropagation()}
-                @click=${this.toggleGestureMode}
-              >
-                <ha-icon icon="mdi:gesture-swipe"></ha-icon>
-              </button>`
+          ${this.opts.showFullscreenButton || this.opts.gestureMode.show_button || this.opts.haGestureMode.show_button
+            ? html`<div class="mode-toggles">
+                ${this.opts.gestureMode.show_button
+                  ? html`<button
+                      class="gesture-toggle ${this._gestureModeActive ? 'active' : ''}"
+                      type="button"
+                      title=${this._gestureModeActive ? 'Exit gesture mode' : 'Gesture mode'}
+                      @pointerdown=${(e: Event) => e.stopPropagation()}
+                      @pointerup=${(e: Event) => e.stopPropagation()}
+                      @click=${this.toggleGestureMode}
+                    >
+                      <ha-icon icon="mdi:gesture-swipe"></ha-icon>
+                    </button>`
+                  : nothing}
+                ${this.opts.showFullscreenButton
+                  ? html`<button
+                      class="fullscreen-toggle ${this._fullscreenActive ? 'active' : ''}"
+                      type="button"
+                      title=${this._fullscreenActive ? 'Exit fullscreen' : 'Fullscreen'}
+                      @pointerdown=${(e: Event) => e.stopPropagation()}
+                      @pointerup=${(e: Event) => e.stopPropagation()}
+                      @click=${this.toggleFullscreen}
+                    >
+                      <ha-icon icon=${this._fullscreenActive ? 'mdi:fullscreen-exit' : 'mdi:fullscreen'}></ha-icon>
+                    </button>`
+                  : nothing}
+                ${this.opts.haGestureMode.show_button
+                  ? html`<button
+                      class="ha-gesture-toggle ${this._haGestureModeActive ? 'active' : ''}"
+                      type="button"
+                      title=${this._haGestureModeActive ? 'Exit Home Assistant gesture mode' : 'Home Assistant gesture mode'}
+                      @pointerdown=${(e: Event) => e.stopPropagation()}
+                      @pointerup=${(e: Event) => e.stopPropagation()}
+                      @click=${this.toggleHAGestureMode}
+                    >
+                      <ha-icon icon="mdi:home-assistant"></ha-icon>
+                    </button>`
+                  : nothing}
+              </div>`
             : nothing}
           <div
             class="capture"
@@ -1808,7 +1984,9 @@ export class TouchpadCard extends LitElement {
           ></div>
           ${this.opts.showStatusText
             ? html`<div class="status">
-                ${this.statusLabel()}${this._locked ? ' (Locked)' : ''}${this._gestureModeActive ? ' (Gestures)' : ''}
+                ${this.statusLabel()}${this._locked ? ' (Locked)' : ''}${this._gestureModeActive ? ' (Gestures)' : ''}${this._haGestureModeActive
+                  ? ' (HA Gestures)'
+                  : ''}
               </div>`
             : nothing}
         </div>
@@ -2193,13 +2371,20 @@ export class TouchpadCard extends LitElement {
       box-shadow: 0 0 0 1px var(--tp-accent-ring);
     }
 
-    .fullscreen-toggle,
-    .gesture-toggle {
+    .mode-toggles {
       position: absolute;
       left: 12px;
       top: 50%;
       transform: translateY(-50%);
       z-index: 3;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .fullscreen-toggle,
+    .gesture-toggle,
+    .ha-gesture-toggle {
       width: 44px;
       height: 44px;
       display: inline-flex;
@@ -2214,27 +2399,23 @@ export class TouchpadCard extends LitElement {
       transition: all 140ms ease;
     }
 
-    .gesture-toggle.with-fullscreen-toggle {
-      transform: translateY(calc(-50% - 52px));
-    }
-
     .fullscreen-toggle:hover,
-    .gesture-toggle:hover {
+    .gesture-toggle:hover,
+    .ha-gesture-toggle:hover {
       border-color: var(--tp-border-strong);
       color: var(--tp-strong-text);
     }
 
     .fullscreen-toggle.active,
-    .gesture-toggle.active {
+    .gesture-toggle.active,
+    .ha-gesture-toggle.active {
       color: var(--tp-accent);
       border-color: var(--tp-accent-border);
       box-shadow: 0 0 0 1px var(--tp-accent-ring);
     }
 
-    ha-card.fullscreen .fullscreen-toggle,
-    :host(:fullscreen) .fullscreen-toggle,
-    ha-card.fullscreen .gesture-toggle,
-    :host(:fullscreen) .gesture-toggle {
+    ha-card.fullscreen .mode-toggles,
+    :host(:fullscreen) .mode-toggles {
       left: max(12px, env(safe-area-inset-left));
     }
 
@@ -2265,7 +2446,8 @@ export class TouchpadCard extends LitElement {
     .keyboard-toggle ha-icon,
     .app-toggle ha-icon,
     .fullscreen-toggle ha-icon,
-    .gesture-toggle ha-icon {
+    .gesture-toggle ha-icon,
+    .ha-gesture-toggle ha-icon {
       width: 20px;
       height: 20px;
       display: flex;
@@ -2495,6 +2677,6 @@ if (!window.customCards.find((c) => c.type === 'touchpad-card')) {
   window.customCards.push({
     type: 'touchpad-card',
     name: 'Lovelace Touchpad Card',
-    description: 'Control your PC or LG webOS TV from Home Assistant with a touchpad, keyboard input, and volume controls.',
+    description: 'Control your PC or LG webOS TV from Home Assistant with a touchpad, keyboard, volume controls, and gestures for devices or Home Assistant actions.',
   });
 }

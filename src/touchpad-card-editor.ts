@@ -7,6 +7,8 @@ import {
   TouchpadControlsProfile,
   TouchpadDeviceConfig,
   TouchpadGestureAction,
+  TouchpadHAGestureAction,
+  TouchpadHAGestureModeConfig,
   TouchpadGestureModeConfig,
   TouchpadOptionConfig,
   TouchpadServerMessage,
@@ -28,6 +30,7 @@ type BooleanOptionField =
 
 type NumberOptionField = 'sensitivity' | 'scroll_multiplier' | 'double_tap_ms' | 'tap_suppression_px';
 type GestureModeActionField = 'swipe_left' | 'swipe_right' | 'swipe_up' | 'swipe_down' | 'tap' | 'hold';
+type HAGestureModeActionField = GestureModeActionField;
 type GestureActionOption = { value: TouchpadGestureAction; label: string };
 
 const BOOLEAN_DEFAULTS: Record<BooleanOptionField, boolean> = {
@@ -118,11 +121,22 @@ const GESTURE_MODE_FIELDS: Array<{ field: GestureModeActionField; label: string 
   { field: 'hold', label: 'Hold' },
 ];
 
+const HA_ACTION_SELECTOR = {
+  ui_action: {
+    actions: ['perform-action', 'none'],
+  },
+};
+
 interface TVAppPickerState {
   apps: WebOSAppConfig[];
   loading: boolean;
   message?: string;
   sourceKey?: string;
+}
+
+interface HAGestureSelectorValueCache {
+  key: string;
+  value: TouchpadHAGestureAction;
 }
 
 function createStorageId(): string {
@@ -136,6 +150,9 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
   @state() private _selectedDeviceIndex = 0;
   @state() private _tvAppPicker: TVAppPickerState = { apps: [], loading: false };
   private _tvAppRequestToken = 0;
+  private _openHAGestureActionFields = new Set<HAGestureModeActionField>();
+  private _closedHAGestureActionFields = new Set<HAGestureModeActionField>();
+  private _haGestureSelectorValues = new Map<HAGestureModeActionField, HAGestureSelectorValueCache>();
 
   public setConfig(config: TouchpadCardConfig): void {
     const devices = this._devicesFromConfig(config);
@@ -298,6 +315,7 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
 
       ${showWebOSAppSection ? this._renderWebOSApps(source, wsUrl, update) : null}
       ${this._renderGestureMode(source, controlsProfile, (gestureMode) => update('gesture_mode', gestureMode))}
+      ${this._renderHAGestureMode(source, (gestureMode) => update('ha_gesture_mode', gestureMode))}
 
       <details class="option-group collapsible">
         <summary>Touchpad tuning</summary>
@@ -315,6 +333,10 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
   protected updated(): void {
     this._syncGestureActionSelects();
   }
+
+  private _computeHAGestureActionLabel = (schema: { name?: string }): string => {
+    return GESTURE_MODE_FIELDS.find(({ field }) => field === schema.name)?.label ?? '';
+  };
 
   private _renderGestureMode(
     source: TouchpadOptionConfig,
@@ -353,6 +375,93 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
           </div>
         </div>
       </details>
+    `;
+  }
+
+  private _renderHAGestureMode(
+    source: TouchpadOptionConfig,
+    update: (gestureMode: TouchpadHAGestureModeConfig) => void
+  ): TemplateResult {
+    const gestureMode = this._haGestureModeValue(source);
+    const updateGestureMode = (patch: Partial<TouchpadHAGestureModeConfig>) => update({ ...gestureMode, ...patch });
+
+    return html`
+      <details class="option-group collapsible">
+        <summary>Home Assistant gesture controls</summary>
+        <div class="collapsible-content">
+          <div class="toggles">
+            <label class="toggle">
+              <input
+                type="checkbox"
+                .checked=${gestureMode.show_button}
+                @change=${(ev: Event) => updateGestureMode({ show_button: (ev.target as HTMLInputElement).checked })}
+              />
+              <span>Show Home Assistant gesture mode button</span>
+            </label>
+            <label class="toggle">
+              <input
+                type="checkbox"
+                .checked=${gestureMode.invert_swipes}
+                @change=${(ev: Event) => updateGestureMode({ invert_swipes: (ev.target as HTMLInputElement).checked })}
+              />
+              <span>Reverse swipe directions</span>
+            </label>
+          </div>
+          <div class="ha-gesture-actions">
+            ${GESTURE_MODE_FIELDS.map(({ field, label }) =>
+              this._renderHAGestureActionField(field, label, gestureMode[field], (value) => updateGestureMode({ [field]: value }))
+            )}
+          </div>
+        </div>
+      </details>
+    `;
+  }
+
+  private _renderHAGestureActionField(
+    field: HAGestureModeActionField,
+    label: string,
+    value: TouchpadHAGestureAction,
+    update: (value: TouchpadHAGestureAction) => void
+  ): TemplateResult {
+    const actionCount = this._hasHAGestureAction(value) ? 1 : 0;
+    const open = this._openHAGestureActionFields.has(field) || (actionCount > 0 && !this._closedHAGestureActionFields.has(field));
+    return html`
+      <details class="ha-gesture-action" .open=${open} @toggle=${(ev: Event) => this._rememberHAGestureActionOpen(field, ev)}>
+        <summary>
+          <span>${label}</span>
+          <span class="ha-action-count">${actionCount === 1 ? '1 action' : `${actionCount} actions`}</span>
+        </summary>
+        <div class="ha-action-editor">
+          ${this._renderHAActionSelector(field, value, update)}
+          <div class="button-row">
+            <button class="secondary" type="button" ?disabled=${actionCount === 0} @click=${() => update({ action: 'none' })}>Clear</button>
+          </div>
+        </div>
+      </details>
+    `;
+  }
+
+  private _renderHAActionSelector(
+    field: HAGestureModeActionField,
+    value: TouchpadHAGestureAction,
+    update: (value: TouchpadHAGestureAction) => void
+  ): TemplateResult {
+    const selectorValue = this._haGestureSelectorValue(field, value);
+    return html`
+      <ha-form
+        class="ha-action-selector"
+        data-ha-gesture-field=${field}
+        .hass=${this.hass}
+        .data=${{ [field]: selectorValue }}
+        .schema=${[{ name: field, required: true, selector: HA_ACTION_SELECTOR }]}
+        .computeLabel=${this._computeHAGestureActionLabel}
+        @value-changed=${(ev: CustomEvent<{ value?: Record<string, unknown> }>) => {
+          const next = this._normalizeHAGestureAction(ev.detail?.value?.[field]);
+          if (!this._sameHAGestureActions(value, next)) {
+            update(next);
+          }
+        }}
+      ></ha-form>
     `;
   }
 
@@ -721,6 +830,36 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
     };
   }
 
+  private _defaultHAGestureMode(): Required<TouchpadHAGestureModeConfig> {
+    return {
+      show_button: false,
+      invert_swipes: false,
+      swipe_left: { action: 'none' },
+      swipe_right: { action: 'none' },
+      swipe_up: { action: 'none' },
+      swipe_down: { action: 'none' },
+      tap: { action: 'none' },
+      hold: { action: 'none' },
+    };
+  }
+
+  private _haGestureModeValue(source: TouchpadOptionConfig): Required<TouchpadHAGestureModeConfig> {
+    const defaults = this._defaultHAGestureMode();
+    const root = this._rootHAGestureMode(source);
+    const local = source.ha_gesture_mode ?? {};
+
+    return {
+      show_button: local.show_button ?? root.show_button ?? defaults.show_button,
+      invert_swipes: local.invert_swipes ?? root.invert_swipes ?? defaults.invert_swipes,
+      swipe_left: this._asHAGestureAction(local.swipe_left ?? root.swipe_left),
+      swipe_right: this._asHAGestureAction(local.swipe_right ?? root.swipe_right),
+      swipe_up: this._asHAGestureAction(local.swipe_up ?? root.swipe_up),
+      swipe_down: this._asHAGestureAction(local.swipe_down ?? root.swipe_down),
+      tap: this._asHAGestureAction(local.tap ?? root.tap),
+      hold: this._asHAGestureAction(local.hold ?? root.hold),
+    };
+  }
+
   private _rootGestureModeForProfile(
     source: TouchpadOptionConfig,
     controlsProfile: TouchpadControlsProfile
@@ -730,6 +869,10 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
     }
     const rootProfile = this._asControlsProfile(this._config?.controls_profile ?? this._config?.backend ?? 'pc');
     return rootProfile === controlsProfile ? this._config?.gesture_mode ?? {} : {};
+  }
+
+  private _rootHAGestureMode(source: TouchpadOptionConfig): TouchpadHAGestureModeConfig {
+    return source === this._config ? {} : this._config?.ha_gesture_mode ?? {};
   }
 
   private _updateWebOSApp(
@@ -782,6 +925,76 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
   private _asGestureAction(value: unknown, fallback: TouchpadGestureAction = 'none'): TouchpadGestureAction {
     const normalized = String(value ?? '').trim() as TouchpadGestureAction;
     return GESTURE_ACTIONS.has(normalized) ? normalized : fallback;
+  }
+
+  private _asHAGestureAction(value: unknown): TouchpadHAGestureAction {
+    return this._normalizeHAGestureAction(value);
+  }
+
+  private _normalizeHAGestureAction(value: unknown): TouchpadHAGestureAction {
+    if (value && typeof value === 'object') {
+      return this._deepMutableClone(value) as TouchpadHAGestureAction;
+    }
+    return { action: 'none' };
+  }
+
+  private _sameHAGestureActions(left: TouchpadHAGestureAction, right: TouchpadHAGestureAction): boolean {
+    return this._stableStringify(left) === this._stableStringify(right);
+  }
+
+  private _haGestureSelectorValue(field: HAGestureModeActionField, value: TouchpadHAGestureAction): TouchpadHAGestureAction {
+    const key = this._stableStringify(value);
+    const cached = this._haGestureSelectorValues.get(field);
+    if (cached?.key === key) {
+      return cached.value;
+    }
+
+    const nextValue = this._deepMutableClone(value) as TouchpadHAGestureAction;
+    this._haGestureSelectorValues.set(field, { key, value: nextValue });
+    return nextValue;
+  }
+
+  private _hasHAGestureAction(value: TouchpadHAGestureAction | undefined): boolean {
+    if (!value || typeof value !== 'object') {
+      return false;
+    }
+    const action = String(value.action ?? '').trim();
+    return Boolean(action) && action !== 'none';
+  }
+
+  private _deepMutableClone(value: unknown): unknown {
+    if (Array.isArray(value)) {
+      return value.map((item) => this._deepMutableClone(item));
+    }
+    if (value && typeof value === 'object') {
+      return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, item]) => [key, this._deepMutableClone(item)]));
+    }
+    return value;
+  }
+
+  private _stableStringify(value: unknown): string {
+    if (Array.isArray(value)) {
+      return `[${value.map((item) => this._stableStringify(item)).join(',')}]`;
+    }
+    if (value && typeof value === 'object') {
+      const record = value as Record<string, unknown>;
+      return `{${Object.keys(record)
+        .sort()
+        .map((key) => `${JSON.stringify(key)}:${this._stableStringify(record[key])}`)
+        .join(',')}}`;
+    }
+    return JSON.stringify(value);
+  }
+
+  private _rememberHAGestureActionOpen(field: HAGestureModeActionField, ev: Event): void {
+    const details = ev.currentTarget as HTMLDetailsElement;
+    if (details.open) {
+      this._openHAGestureActionFields.add(field);
+      this._closedHAGestureActionFields.delete(field);
+    } else {
+      this._openHAGestureActionFields.delete(field);
+      this._closedHAGestureActionFields.add(field);
+    }
   }
 
   private _cleanGestureModeAfterProfileChange(
@@ -875,6 +1088,7 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
       delete next.backend;
       delete next.controls_profile;
       delete next.gesture_mode;
+      delete next.ha_gesture_mode;
     }
 
     this._selectedDeviceIndex = devices.length - 1;
@@ -914,6 +1128,7 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
       show_app_buttons: device.show_app_buttons,
       auto_focus_keyboard: device.auto_focus_keyboard,
       gesture_mode: device.gesture_mode ? { ...device.gesture_mode } : rootProfile === controlsProfile ? config.gesture_mode : undefined,
+      ha_gesture_mode: device.ha_gesture_mode ? { ...device.ha_gesture_mode } : config.ha_gesture_mode,
       webos_apps: device.webos_apps,
       invert_scroll: device.invert_scroll,
       sensitivity: device.sensitivity,
@@ -981,6 +1196,11 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
       target.gesture_mode = { ...source.gesture_mode };
     } else {
       delete target.gesture_mode;
+    }
+    if (source.ha_gesture_mode) {
+      target.ha_gesture_mode = { ...source.ha_gesture_mode };
+    } else {
+      delete target.ha_gesture_mode;
     }
     target.webos_apps = source.webos_apps?.map((app) => ({ ...app }));
     target.invert_scroll = source.invert_scroll ?? BOOLEAN_DEFAULTS.invert_scroll;
@@ -1161,6 +1381,7 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
     input[type='text'],
     input[type='number'],
     select,
+    textarea,
     ha-icon-picker {
       box-sizing: border-box;
       width: 100%;
@@ -1169,7 +1390,8 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
 
     input[type='text'],
     input[type='number'],
-    select {
+    select,
+    textarea {
       height: 40px;
       padding: 0 10px;
       border: 1px solid var(--divider-color, rgba(127, 127, 127, 0.35));
@@ -1179,9 +1401,16 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
       font: inherit;
     }
 
+    textarea {
+      min-height: 140px;
+      padding: 10px;
+      resize: vertical;
+    }
+
     input[type='text']:focus,
     input[type='number']:focus,
-    select:focus {
+    select:focus,
+    textarea:focus {
       border-color: var(--primary-color);
       outline: none;
     }
@@ -1201,7 +1430,7 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
       padding-top: 2px;
     }
 
-    .collapsible summary {
+    .collapsible > summary {
       display: flex;
       align-items: center;
       gap: 8px;
@@ -1213,11 +1442,11 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
       user-select: none;
     }
 
-    .collapsible summary::-webkit-details-marker {
+    .collapsible > summary::-webkit-details-marker {
       display: none;
     }
 
-    .collapsible summary::before {
+    .collapsible > summary::before {
       content: '';
       width: 0;
       height: 0;
@@ -1228,7 +1457,7 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
       transition: transform 120ms ease;
     }
 
-    .collapsible[open] summary::before {
+    .collapsible[open] > summary::before {
       transform: rotate(90deg);
     }
 
@@ -1279,6 +1508,50 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
     .toggle input {
       flex: 0 0 auto;
       margin-left: 0;
+    }
+
+    .ha-gesture-actions {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .ha-gesture-action {
+      border: 1px solid var(--divider-color, rgba(127, 127, 127, 0.35));
+      border-radius: 8px;
+      padding: 10px 12px;
+    }
+
+    .ha-gesture-action summary {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      cursor: pointer;
+      list-style: none;
+      color: var(--primary-text-color);
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .ha-gesture-action summary::-webkit-details-marker {
+      display: none;
+    }
+
+    .ha-action-count {
+      color: var(--secondary-text-color);
+      font-weight: 500;
+    }
+
+    .ha-action-editor {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-top: 10px;
+    }
+
+    .ha-action-selector {
+      min-width: 0;
     }
 
     .app-list {

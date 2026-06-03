@@ -1,5 +1,8 @@
 # Card Changelog
 
+## 0.10.0
+- Added Home Assistant gesture mode with a separate touchpad toggle and visual-editor configurable actions.
+
 ## 0.9.0
 - Added a configurable Gesture mode button with swipe, tap, and hold actions for PC and LG webOS controls.
 - Added a remembered webOS app toggle button that shows or hides configured app shortcuts.

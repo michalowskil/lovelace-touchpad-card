@@ -43,6 +43,19 @@ export interface TouchpadGestureModeConfig {
   hold?: TouchpadGestureAction;
 }
 
+export type TouchpadHAGestureAction = Record<string, unknown>;
+
+export interface TouchpadHAGestureModeConfig {
+  show_button?: boolean;
+  invert_swipes?: boolean;
+  swipe_left?: TouchpadHAGestureAction;
+  swipe_right?: TouchpadHAGestureAction;
+  swipe_up?: TouchpadHAGestureAction;
+  swipe_down?: TouchpadHAGestureAction;
+  tap?: TouchpadHAGestureAction;
+  hold?: TouchpadHAGestureAction;
+}
+
 export interface TouchpadEndpointConfig {
   wsUrl?: string;
   controls_profile?: TouchpadControlsProfile;
@@ -61,6 +74,7 @@ export interface TouchpadOptionConfig {
   auto_focus_keyboard?: boolean;
   webos_apps?: WebOSAppConfig[];
   gesture_mode?: TouchpadGestureModeConfig;
+  ha_gesture_mode?: TouchpadHAGestureModeConfig;
   sensitivity?: number;
   scroll_multiplier?: number;
   invert_scroll?: boolean;
