@@ -192,7 +192,7 @@ Example with the **NGINX Home Assistant SSL proxy** add-on:
 For remote access, you only need to expose your HTTPS port (usually `443`) to the internet. Do not expose backend ports (for example `8765` or `8778`) directly unless you understand the risk: these WebSocket backends do not add their own login screen.
 
 ## Changelog
-- **Card (frontend):** latest v0.10.0 — see [CHANGELOG.md](CHANGELOG.md). Highlights: Added Home Assistant gesture mode with a separate touchpad toggle and visual-editor configurable actions.
+- **Card (frontend):** latest v0.11.0 — see [CHANGELOG.md](CHANGELOG.md). Highlights: Double-tap actions for both gesture modes, optional auto-closing webOS app launcher, and restored dashboard scroll after fullscreen.
 - **Windows backend:** latest v0.5.1 — see [backend/CHANGELOG.md](backend/CHANGELOG.md). Highlights: tray update checks now track the Windows backend version, so card-only releases do not notify Windows users.
 - **webOS add-on:** latest v0.4.0 — see [addon/webos-pointer-bridge/CHANGELOG.md](addon/webos-pointer-bridge/CHANGELOG.md). Highlights: app launch support plus installed-app reporting for the card editor picker.
 

@@ -1,5 +1,10 @@
 # Card Changelog
 
+## 0.11.0
+- Added Double tap actions to Gesture mode and Home Assistant gesture mode.
+- Added an optional webOS setting that closes the app launcher after selecting an app.
+- Restored the dashboard scroll position after exiting fullscreen touchpad mode.
+
 ## 0.10.0
 - Added Home Assistant gesture mode with a separate touchpad toggle and visual-editor configurable actions.
 
