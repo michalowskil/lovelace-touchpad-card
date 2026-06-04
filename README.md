@@ -110,6 +110,42 @@ ha_gesture_mode:
       entity_id: script.movie_mode
 ```
 
+## Audio controls
+
+Enable **Show audio icons** in the **Audio controls** editor section to show Volume up, Volume down, and Mute buttons on the touchpad. With **Audio button actions** set to **Device volume controls**, the buttons send volume commands to the selected PC or LG webOS backend.
+
+Switch **Audio button actions** to **Home Assistant actions** to configure separate Tap and Hold actions for each audio button with Home Assistant's UI action selector. The saved YAML uses `audio_controls`:
+
+```yaml
+audio_controls:
+  mode: home_assistant
+  volume_up:
+    tap:
+      action: perform-action
+      perform_action: media_player.volume_up
+      target:
+        entity_id: media_player.living_room
+    hold:
+      action: perform-action
+      perform_action: script.turn_on
+      target:
+        entity_id: script.audio_boost
+  volume_down:
+    tap:
+      action: perform-action
+      perform_action: media_player.volume_down
+      target:
+        entity_id: media_player.living_room
+  volume_mute:
+    tap:
+      action: perform-action
+      perform_action: media_player.volume_mute
+      target:
+        entity_id: media_player.living_room
+      data:
+        is_volume_muted: true
+```
+
 ## Optional webOS App Button
 
 For a webOS device, set **Controls profile** to **LG webOS controls** and enable **Show webOS app button** in the card editor. The card then shows an app toggle next to the keyboard toggle; tapping it shows or hides the configured app buttons below the touchpad surface.
@@ -192,7 +228,7 @@ Example with the **NGINX Home Assistant SSL proxy** add-on:
 For remote access, you only need to expose your HTTPS port (usually `443`) to the internet. Do not expose backend ports (for example `8765` or `8778`) directly unless you understand the risk: these WebSocket backends do not add their own login screen.
 
 ## Changelog
-- **Card (frontend):** latest v0.11.0 — see [CHANGELOG.md](CHANGELOG.md). Highlights: Double-tap actions for both gesture modes, optional auto-closing webOS app launcher, and restored dashboard scroll after fullscreen.
+- **Card (frontend):** latest v0.12.0 — see [CHANGELOG.md](CHANGELOG.md). Highlights: Audio buttons can now use device volume controls or Home Assistant Tap/Hold actions.
 - **Windows backend:** latest v0.5.1 — see [backend/CHANGELOG.md](backend/CHANGELOG.md). Highlights: tray update checks now track the Windows backend version, so card-only releases do not notify Windows users.
 - **webOS add-on:** latest v0.4.0 — see [addon/webos-pointer-bridge/CHANGELOG.md](addon/webos-pointer-bridge/CHANGELOG.md). Highlights: app launch support plus installed-app reporting for the card editor picker.
 

@@ -1,5 +1,9 @@
 # Card Changelog
 
+## 0.12.0
+- Added an Audio controls editor section with selectable device-volume or Home Assistant action modes.
+- Added separate Tap and Hold Home Assistant actions for Volume up, Volume down, and Mute audio buttons.
+
 ## 0.11.0
 - Added Double tap actions to Gesture mode and Home Assistant gesture mode.
 - Added an optional webOS setting that closes the app launcher after selecting an app.

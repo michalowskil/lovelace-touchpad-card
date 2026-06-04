@@ -46,6 +46,22 @@ export interface TouchpadGestureModeConfig {
 
 export type TouchpadHAGestureAction = Record<string, unknown>;
 
+export type TouchpadAudioControlsMode = 'device' | 'home_assistant';
+export type TouchpadAudioButtonField = 'volume_up' | 'volume_down' | 'volume_mute';
+export type TouchpadAudioActionEvent = 'tap' | 'hold';
+export type TouchpadAudioButtonActions = Partial<Record<TouchpadAudioActionEvent, TouchpadHAGestureAction>>;
+
+export interface TouchpadAudioControlsConfig {
+  mode?: TouchpadAudioControlsMode;
+  volume_up?: TouchpadAudioButtonActions;
+  volume_down?: TouchpadAudioButtonActions;
+  volume_mute?: TouchpadAudioButtonActions;
+}
+
+export type ResolvedTouchpadAudioControlsConfig = {
+  mode: TouchpadAudioControlsMode;
+} & Record<TouchpadAudioButtonField, Required<TouchpadAudioButtonActions>>;
+
 export interface TouchpadHAGestureModeConfig {
   show_button?: boolean;
   invert_swipes?: boolean;
@@ -76,6 +92,7 @@ export interface TouchpadOptionConfig {
   hide_app_launcher_after_launch?: boolean;
   auto_focus_keyboard?: boolean;
   webos_apps?: WebOSAppConfig[];
+  audio_controls?: TouchpadAudioControlsConfig;
   gesture_mode?: TouchpadGestureModeConfig;
   ha_gesture_mode?: TouchpadHAGestureModeConfig;
   sensitivity?: number;

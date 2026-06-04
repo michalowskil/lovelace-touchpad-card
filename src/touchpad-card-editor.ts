@@ -3,6 +3,11 @@ import type { TemplateResult } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { fireEvent, HomeAssistant, LovelaceCardEditor } from 'custom-card-helpers';
 import {
+  ResolvedTouchpadAudioControlsConfig,
+  TouchpadAudioActionEvent,
+  TouchpadAudioButtonField,
+  TouchpadAudioControlsConfig,
+  TouchpadAudioControlsMode,
   TouchpadCardConfig,
   TouchpadControlsProfile,
   TouchpadDeviceConfig,
@@ -32,6 +37,8 @@ type BooleanOptionField =
 type NumberOptionField = 'sensitivity' | 'scroll_multiplier' | 'double_tap_ms' | 'tap_suppression_px';
 type GestureModeActionField = 'swipe_left' | 'swipe_right' | 'swipe_up' | 'swipe_down' | 'tap' | 'double_tap' | 'hold';
 type HAGestureModeActionField = GestureModeActionField;
+type TouchpadAudioActionField = `${TouchpadAudioButtonField}_${TouchpadAudioActionEvent}`;
+type HAActionEditorField = HAGestureModeActionField | TouchpadAudioActionField;
 type GestureActionOption = { value: TouchpadGestureAction; label: string };
 
 const BOOLEAN_DEFAULTS: Record<BooleanOptionField, boolean> = {
@@ -124,6 +131,36 @@ const GESTURE_MODE_FIELDS: Array<{ field: GestureModeActionField; label: string 
   { field: 'hold', label: 'Hold' },
 ];
 
+const AUDIO_BUTTON_FIELDS: Array<{ field: TouchpadAudioButtonField; label: string }> = [
+  { field: 'volume_up', label: 'Volume up' },
+  { field: 'volume_down', label: 'Volume down' },
+  { field: 'volume_mute', label: 'Mute' },
+];
+
+const AUDIO_ACTION_EVENTS: Array<{ event: TouchpadAudioActionEvent; label: string }> = [
+  { event: 'tap', label: 'Tap' },
+  { event: 'hold', label: 'Hold' },
+];
+
+const AUDIO_ACTION_FIELDS: Array<{
+  field: TouchpadAudioActionField;
+  button: TouchpadAudioButtonField;
+  event: TouchpadAudioActionEvent;
+  label: string;
+}> = AUDIO_BUTTON_FIELDS.flatMap(({ field: button, label: buttonLabel }) =>
+  AUDIO_ACTION_EVENTS.map(({ event, label }) => ({
+    field: `${button}_${event}` as TouchpadAudioActionField,
+    button,
+    event,
+    label: `${buttonLabel} ${label.toLowerCase()}`,
+  }))
+);
+
+const HA_ACTION_FIELD_LABELS = new Map<HAActionEditorField, string>([
+  ...GESTURE_MODE_FIELDS.map(({ field, label }) => [field, label] as [HAActionEditorField, string]),
+  ...AUDIO_ACTION_FIELDS.map(({ field, label }) => [field, label] as [HAActionEditorField, string]),
+]);
+
 const HA_ACTION_SELECTOR = {
   ui_action: {
     actions: ['perform-action', 'none'],
@@ -153,9 +190,9 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
   @state() private _selectedDeviceIndex = 0;
   @state() private _tvAppPicker: TVAppPickerState = { apps: [], loading: false };
   private _tvAppRequestToken = 0;
-  private _openHAGestureActionFields = new Set<HAGestureModeActionField>();
-  private _closedHAGestureActionFields = new Set<HAGestureModeActionField>();
-  private _haGestureSelectorValues = new Map<HAGestureModeActionField, HAGestureSelectorValueCache>();
+  private _openHAGestureActionFields = new Set<HAActionEditorField>();
+  private _closedHAGestureActionFields = new Set<HAActionEditorField>();
+  private _haGestureSelectorValues = new Map<HAActionEditorField, HAGestureSelectorValueCache>();
 
   public setConfig(config: TouchpadCardConfig): void {
     const devices = this._devicesFromConfig(config);
@@ -292,7 +329,7 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
     wsUrl: string,
     update: (field: keyof TouchpadOptionConfig, value: unknown) => void
   ): TemplateResult {
-    const booleanFields = BOOLEAN_FIELDS.filter(({ field }) => field !== 'show_app_buttons');
+    const booleanFields = BOOLEAN_FIELDS.filter(({ field }) => field !== 'show_app_buttons' && field !== 'show_audio_controls');
     const showWebOSAppSection = controlsProfile === 'webos';
 
     return html`
@@ -316,6 +353,7 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
         </div>
       </details>
 
+      ${this._renderAudioControls(source, update)}
       ${showWebOSAppSection ? this._renderWebOSApps(source, wsUrl, update) : null}
       ${this._renderGestureMode(source, controlsProfile, (gestureMode) => update('gesture_mode', gestureMode))}
       ${this._renderHAGestureMode(source, (gestureMode) => update('ha_gesture_mode', gestureMode))}
@@ -338,8 +376,57 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
   }
 
   private _computeHAGestureActionLabel = (schema: { name?: string }): string => {
-    return GESTURE_MODE_FIELDS.find(({ field }) => field === schema.name)?.label ?? '';
+    return HA_ACTION_FIELD_LABELS.get(schema.name as HAActionEditorField) ?? '';
   };
+
+  private _renderAudioControls(
+    source: TouchpadOptionConfig,
+    update: (field: keyof TouchpadOptionConfig, value: unknown) => void
+  ): TemplateResult {
+    const audioControls = this._audioControlsValue(source);
+    const updateAudioControls = (patch: Partial<TouchpadAudioControlsConfig>) =>
+      update('audio_controls', { ...audioControls, ...patch });
+
+    return html`
+      <details class="option-group collapsible">
+        <summary>Audio controls</summary>
+        <div class="collapsible-content">
+          <div class="toggles">
+            <label class="toggle">
+              <input
+                type="checkbox"
+                .checked=${this._booleanValue(source, 'show_audio_controls')}
+                @change=${(ev: Event) => update('show_audio_controls', (ev.target as HTMLInputElement).checked)}
+              />
+              <span>Show audio icons</span>
+            </label>
+          </div>
+          <div class="fields">
+            <label class="field">
+              <span>Audio button actions</span>
+              <select
+                .value=${audioControls.mode}
+                @change=${(ev: Event) =>
+                  updateAudioControls({ mode: this._asAudioControlsMode((ev.target as HTMLSelectElement).value) })}
+              >
+                <option value="device">Device volume controls</option>
+                <option value="home_assistant">Home Assistant actions</option>
+              </select>
+            </label>
+          </div>
+          ${audioControls.mode === 'home_assistant'
+            ? html`<div class="ha-gesture-actions audio-actions">
+                ${AUDIO_ACTION_FIELDS.map(({ field, button, event, label }) =>
+                  this._renderHAActionField(field, label, audioControls[button][event], (value) =>
+                    updateAudioControls({ [button]: { ...audioControls[button], [event]: value } })
+                  )
+                )}
+              </div>`
+            : null}
+        </div>
+      </details>
+    `;
+  }
 
   private _renderGestureMode(
     source: TouchpadOptionConfig,
@@ -426,6 +513,16 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
     value: TouchpadHAGestureAction,
     update: (value: TouchpadHAGestureAction) => void
   ): TemplateResult {
+    return this._renderHAActionField(field, label, value, update, field === 'double_tap' ? this._renderDoubleTapDelayHint() : null);
+  }
+
+  private _renderHAActionField(
+    field: HAActionEditorField,
+    label: string,
+    value: TouchpadHAGestureAction,
+    update: (value: TouchpadHAGestureAction) => void,
+    hint: TemplateResult | null = null
+  ): TemplateResult {
     const actionCount = this._hasHAGestureAction(value) ? 1 : 0;
     const open = this._openHAGestureActionFields.has(field) || (actionCount > 0 && !this._closedHAGestureActionFields.has(field));
     return html`
@@ -435,7 +532,7 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
           <span class="ha-action-count">${actionCount === 1 ? '1 action' : `${actionCount} actions`}</span>
         </summary>
         <div class="ha-action-editor">
-          ${field === 'double_tap' ? this._renderDoubleTapDelayHint() : null}
+          ${hint}
           ${this._renderHAActionSelector(field, value, update)}
           <div class="button-row">
             <button class="secondary" type="button" ?disabled=${actionCount === 0} @click=${() => update({ action: 'none' })}>Clear</button>
@@ -446,7 +543,7 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
   }
 
   private _renderHAActionSelector(
-    field: HAGestureModeActionField,
+    field: HAActionEditorField,
     value: TouchpadHAGestureAction,
     update: (value: TouchpadHAGestureAction) => void
   ): TemplateResult {
@@ -882,6 +979,39 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
     };
   }
 
+  private _defaultAudioControls(): ResolvedTouchpadAudioControlsConfig {
+    return {
+      mode: 'device',
+      volume_up: { tap: { action: 'none' }, hold: { action: 'none' } },
+      volume_down: { tap: { action: 'none' }, hold: { action: 'none' } },
+      volume_mute: { tap: { action: 'none' }, hold: { action: 'none' } },
+    };
+  }
+
+  private _audioControlsValue(source: TouchpadOptionConfig): ResolvedTouchpadAudioControlsConfig {
+    const defaults = this._defaultAudioControls();
+    const root = this._rootAudioControls(source);
+    const local = source.audio_controls ?? {};
+
+    return {
+      mode: this._asAudioControlsMode(local.mode ?? root.mode ?? defaults.mode),
+      volume_up: this._audioButtonActionsValue(local.volume_up, root.volume_up, defaults.volume_up),
+      volume_down: this._audioButtonActionsValue(local.volume_down, root.volume_down, defaults.volume_down),
+      volume_mute: this._audioButtonActionsValue(local.volume_mute, root.volume_mute, defaults.volume_mute),
+    };
+  }
+
+  private _audioButtonActionsValue(
+    local: TouchpadAudioControlsConfig[TouchpadAudioButtonField] | undefined,
+    root: TouchpadAudioControlsConfig[TouchpadAudioButtonField] | undefined,
+    defaults: ResolvedTouchpadAudioControlsConfig[TouchpadAudioButtonField]
+  ): ResolvedTouchpadAudioControlsConfig[TouchpadAudioButtonField] {
+    return {
+      tap: this._asHAGestureAction(local?.tap ?? root?.tap ?? defaults.tap),
+      hold: this._asHAGestureAction(local?.hold ?? root?.hold ?? defaults.hold),
+    };
+  }
+
   private _rootGestureModeForProfile(
     source: TouchpadOptionConfig,
     controlsProfile: TouchpadControlsProfile
@@ -895,6 +1025,10 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
 
   private _rootHAGestureMode(source: TouchpadOptionConfig): TouchpadHAGestureModeConfig {
     return source === this._config ? {} : this._config?.ha_gesture_mode ?? {};
+  }
+
+  private _rootAudioControls(source: TouchpadOptionConfig): TouchpadAudioControlsConfig {
+    return source === this._config ? {} : this._config?.audio_controls ?? {};
   }
 
   private _updateWebOSApp(
@@ -944,6 +1078,10 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
     return value === 'dark' || value === 'light' ? value : 'auto';
   }
 
+  private _asAudioControlsMode(value: unknown): TouchpadAudioControlsMode {
+    return value === 'home_assistant' ? 'home_assistant' : 'device';
+  }
+
   private _asGestureAction(value: unknown, fallback: TouchpadGestureAction = 'none'): TouchpadGestureAction {
     const normalized = String(value ?? '').trim() as TouchpadGestureAction;
     return GESTURE_ACTIONS.has(normalized) ? normalized : fallback;
@@ -964,7 +1102,7 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
     return this._stableStringify(left) === this._stableStringify(right);
   }
 
-  private _haGestureSelectorValue(field: HAGestureModeActionField, value: TouchpadHAGestureAction): TouchpadHAGestureAction {
+  private _haGestureSelectorValue(field: HAActionEditorField, value: TouchpadHAGestureAction): TouchpadHAGestureAction {
     const key = this._stableStringify(value);
     const cached = this._haGestureSelectorValues.get(field);
     if (cached?.key === key) {
@@ -1008,7 +1146,7 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
     return JSON.stringify(value);
   }
 
-  private _rememberHAGestureActionOpen(field: HAGestureModeActionField, ev: Event): void {
+  private _rememberHAGestureActionOpen(field: HAActionEditorField, ev: Event): void {
     const details = ev.currentTarget as HTMLDetailsElement;
     if (details.open) {
       this._openHAGestureActionFields.add(field);
@@ -1112,6 +1250,7 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
       delete next.controls_profile;
       delete next.gesture_mode;
       delete next.ha_gesture_mode;
+      delete next.audio_controls;
     }
 
     this._selectedDeviceIndex = devices.length - 1;
@@ -1151,6 +1290,7 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
       show_app_buttons: device.show_app_buttons,
       hide_app_launcher_after_launch: device.hide_app_launcher_after_launch,
       auto_focus_keyboard: device.auto_focus_keyboard,
+      audio_controls: device.audio_controls ? { ...device.audio_controls } : config.audio_controls,
       gesture_mode: device.gesture_mode ? { ...device.gesture_mode } : rootProfile === controlsProfile ? config.gesture_mode : undefined,
       ha_gesture_mode: device.ha_gesture_mode ? { ...device.ha_gesture_mode } : config.ha_gesture_mode,
       webos_apps: device.webos_apps,
@@ -1219,6 +1359,11 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
     target.hide_app_launcher_after_launch =
       source.hide_app_launcher_after_launch ?? BOOLEAN_DEFAULTS.hide_app_launcher_after_launch;
     target.auto_focus_keyboard = source.auto_focus_keyboard ?? BOOLEAN_DEFAULTS.auto_focus_keyboard;
+    if (source.audio_controls) {
+      target.audio_controls = { ...source.audio_controls };
+    } else {
+      delete target.audio_controls;
+    }
     if (source.gesture_mode) {
       target.gesture_mode = { ...source.gesture_mode };
     } else {

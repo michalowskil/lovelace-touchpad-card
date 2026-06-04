@@ -3,6 +3,10 @@ import { customElement, property, state } from 'lit/decorators.js';
 import { HomeAssistant, LovelaceCardEditor } from 'custom-card-helpers';
 import {
   KeyCommand,
+  ResolvedTouchpadAudioControlsConfig,
+  TouchpadAudioButtonField,
+  TouchpadAudioControlsConfig,
+  TouchpadAudioControlsMode,
   TouchpadCardConfig,
   TouchpadControlsProfile,
   TouchpadDeviceConfig,
@@ -84,6 +88,7 @@ interface TouchpadRuntimeOptions {
   showAppButtons: boolean;
   hideAppLauncherAfterLaunch: boolean;
   autoFocusKeyboard: boolean;
+  audioControls: ResolvedTouchpadAudioControlsConfig;
   gestureMode: Required<TouchpadGestureModeConfig>;
   haGestureMode: Required<TouchpadHAGestureModeConfig>;
   webosApps: WebOSAppConfig[];
@@ -208,6 +213,15 @@ function defaultHAGestureMode(): Required<TouchpadHAGestureModeConfig> {
   };
 }
 
+function defaultAudioControls(): ResolvedTouchpadAudioControlsConfig {
+  return {
+    mode: 'device',
+    volume_up: { tap: { action: 'none' }, hold: { action: 'none' } },
+    volume_down: { tap: { action: 'none' }, hold: { action: 'none' } },
+    volume_mute: { tap: { action: 'none' }, hold: { action: 'none' } },
+  };
+}
+
 function createStorageId(): string {
   return `tp_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
 }
@@ -254,6 +268,13 @@ export class TouchpadCard extends LitElement {
   private gestureLastTapTime = 0;
   private gestureTapTimer?: number;
   private holdTimer?: number;
+  private audioHoldTimer?: number;
+  private audioPress?: {
+    pointerId: number;
+    target: HTMLElement;
+    holdFired: boolean;
+  };
+  private suppressAudioClick = false;
   private gestureHoldFired = false;
   private dragPointerId?: number;
   private lockedPan?: LockedPanState;
@@ -275,6 +296,7 @@ export class TouchpadCard extends LitElement {
     showAppButtons: DEFAULTS.showAppButtons,
     hideAppLauncherAfterLaunch: DEFAULTS.hideAppLauncherAfterLaunch,
     autoFocusKeyboard: DEFAULTS.autoFocusKeyboard,
+    audioControls: defaultAudioControls(),
     gestureMode: defaultGestureMode(DEFAULTS.controlsProfile),
     haGestureMode: defaultHAGestureMode(),
     webosApps: DEFAULT_WEBOS_APPS,
@@ -357,6 +379,7 @@ export class TouchpadCard extends LitElement {
       clearTimeout(this.holdTimer);
       this.holdTimer = undefined;
     }
+    this.cancelAudioPress();
     this.cancelFullscreenScrollRestore();
     this.fullscreenScrollSnapshot = undefined;
     if (this.dragPointerId != null) {
@@ -404,6 +427,10 @@ export class TouchpadCard extends LitElement {
       return this.deepClone(action) as TouchpadHAGestureAction;
     }
     return { action: 'none' };
+  }
+
+  private normalizeAudioControlsMode(mode: unknown): TouchpadAudioControlsMode {
+    return mode === 'home_assistant' ? 'home_assistant' : 'device';
   }
 
   private deepClone(value: unknown): unknown {
@@ -457,6 +484,33 @@ export class TouchpadCard extends LitElement {
     };
   }
 
+  private resolveAudioControls(
+    config: TouchpadCardConfig,
+    device: TouchpadDeviceConfig | undefined
+  ): ResolvedTouchpadAudioControlsConfig {
+    const defaults = defaultAudioControls();
+    const root = config.audio_controls ?? {};
+    const local = device?.audio_controls ?? {};
+
+    return {
+      mode: this.normalizeAudioControlsMode(local.mode ?? root.mode ?? defaults.mode),
+      volume_up: this.resolveAudioButtonActions(local.volume_up, root.volume_up, defaults.volume_up),
+      volume_down: this.resolveAudioButtonActions(local.volume_down, root.volume_down, defaults.volume_down),
+      volume_mute: this.resolveAudioButtonActions(local.volume_mute, root.volume_mute, defaults.volume_mute),
+    };
+  }
+
+  private resolveAudioButtonActions(
+    local: TouchpadAudioControlsConfig[TouchpadAudioButtonField] | undefined,
+    root: TouchpadAudioControlsConfig[TouchpadAudioButtonField] | undefined,
+    defaults: ResolvedTouchpadAudioControlsConfig[TouchpadAudioButtonField]
+  ): ResolvedTouchpadAudioControlsConfig[TouchpadAudioButtonField] {
+    return {
+      tap: this.normalizeHAGestureAction(local?.tap ?? root?.tap ?? defaults.tap),
+      hold: this.normalizeHAGestureAction(local?.hold ?? root?.hold ?? defaults.hold),
+    };
+  }
+
   private resolveOptions(config: TouchpadCardConfig, device?: TouchpadDeviceConfig): TouchpadRuntimeOptions {
     const webosApps = device?.webos_apps ?? config.webos_apps;
     const controlsProfile = this.normalizeControlsProfile(
@@ -482,6 +536,7 @@ export class TouchpadCard extends LitElement {
         config.hide_app_launcher_after_launch ??
         DEFAULTS.hideAppLauncherAfterLaunch,
       autoFocusKeyboard: device?.auto_focus_keyboard ?? config.auto_focus_keyboard ?? DEFAULTS.autoFocusKeyboard,
+      audioControls: this.resolveAudioControls(config, device),
       gestureMode: this.resolveGestureMode(config, device, controlsProfile),
       haGestureMode: this.resolveHAGestureMode(config, device),
       webosApps: normalizeWebOSApps(webosApps ?? DEFAULT_WEBOS_APPS),
@@ -544,6 +599,7 @@ export class TouchpadCard extends LitElement {
         show_app_buttons: config.show_app_buttons,
         hide_app_launcher_after_launch: config.hide_app_launcher_after_launch,
         auto_focus_keyboard: config.auto_focus_keyboard,
+        audio_controls: config.audio_controls,
         gesture_mode: config.gesture_mode,
         ha_gesture_mode: config.ha_gesture_mode,
         webos_apps: config.webos_apps,
@@ -574,6 +630,9 @@ export class TouchpadCard extends LitElement {
     }
     if (!this.opts.showSpeedButtons) {
       this._speedMultiplier = 1;
+    }
+    if (!this.opts.showAudioControls) {
+      this.cancelAudioPress();
     }
     if (!this.canShowAppLauncherToggle()) {
       this._appLauncherOpen = false;
@@ -1383,7 +1442,7 @@ export class TouchpadCard extends LitElement {
     }
     const [domain, service] = serviceName.split('.', 2);
     if (!domain || !service) {
-      logCardWarn('Cannot execute Home Assistant gesture action because service name is invalid.', serviceName);
+      logCardWarn('Cannot execute Home Assistant action because service name is invalid.', serviceName);
       return;
     }
 
@@ -1547,6 +1606,121 @@ export class TouchpadCard extends LitElement {
       this.socket.send(JSON.stringify(msg));
     } catch (err) {
       logCardError('Failed to send volume action.', err);
+    }
+  }
+
+  private audioButtonField(action: VolumeAction): TouchpadAudioButtonField {
+    switch (action) {
+      case 'up':
+        return 'volume_up';
+      case 'down':
+        return 'volume_down';
+      case 'mute':
+        return 'volume_mute';
+    }
+  }
+
+  private executeAudioButtonAction(action: VolumeAction, eventName: 'tap' | 'hold'): void {
+    if (this.opts.audioControls.mode !== 'home_assistant') {
+      if (eventName === 'tap') {
+        this.sendVolume(action);
+      }
+      return;
+    }
+
+    const haAction = this.opts.audioControls[this.audioButtonField(action)][eventName];
+    if (!this.hasHAGestureAction(haAction)) {
+      return;
+    }
+    if (!this.hass) {
+      logCardWarn('Cannot execute Home Assistant audio action because hass is not available.');
+      return;
+    }
+
+    void this.executeHAAction(haAction).catch((err) => {
+      logCardError('Failed to execute Home Assistant audio action.', err);
+    });
+  }
+
+  private handleAudioPointerDown(ev: PointerEvent, action: VolumeAction): void {
+    if (ev.button !== 0) {
+      return;
+    }
+    ev.stopPropagation();
+    this.cancelAudioPress();
+
+    const target = ev.currentTarget as HTMLElement;
+    this.audioPress = {
+      pointerId: ev.pointerId,
+      target,
+      holdFired: false,
+    };
+    target.setPointerCapture?.(ev.pointerId);
+
+    if (this.opts.audioControls.mode === 'home_assistant') {
+      this.audioHoldTimer = window.setTimeout(() => {
+        if (!this.audioPress || this.audioPress.pointerId !== ev.pointerId) {
+          return;
+        }
+        this.audioPress.holdFired = true;
+        this.suppressAudioClick = true;
+        this.executeAudioButtonAction(action, 'hold');
+      }, HOLD_DELAY_MS);
+    }
+  }
+
+  private handleAudioPointerUp(ev: PointerEvent, action: VolumeAction): void {
+    ev.stopPropagation();
+    const press = this.audioPress;
+    if (!press || press.pointerId !== ev.pointerId) {
+      return;
+    }
+
+    this.releaseAudioPointerCapture(press.target, ev.pointerId);
+    this.clearAudioHoldTimer();
+    this.audioPress = undefined;
+    this.suppressAudioClick = true;
+
+    if (!press.holdFired) {
+      this.executeAudioButtonAction(action, 'tap');
+    }
+  }
+
+  private handleAudioPointerCancel(ev: PointerEvent): void {
+    ev.stopPropagation();
+    if (this.audioPress?.pointerId === ev.pointerId) {
+      this.cancelAudioPress();
+    }
+  }
+
+  private handleAudioClick(ev: MouseEvent, action: VolumeAction): void {
+    ev.stopPropagation();
+    if (this.suppressAudioClick) {
+      ev.preventDefault();
+      this.suppressAudioClick = false;
+      return;
+    }
+    this.executeAudioButtonAction(action, 'tap');
+  }
+
+  private clearAudioHoldTimer(): void {
+    if (this.audioHoldTimer) {
+      clearTimeout(this.audioHoldTimer);
+      this.audioHoldTimer = undefined;
+    }
+  }
+
+  private cancelAudioPress(): void {
+    this.clearAudioHoldTimer();
+    if (this.audioPress) {
+      this.releaseAudioPointerCapture(this.audioPress.target, this.audioPress.pointerId);
+      this.audioPress = undefined;
+    }
+  }
+
+  private releaseAudioPointerCapture(target: HTMLElement, pointerId: number): void {
+    if (target.hasPointerCapture?.(pointerId)) {
+      target.releasePointerCapture(pointerId);
     }
   }
 
@@ -1952,6 +2126,7 @@ export class TouchpadCard extends LitElement {
 
   private resetInteractionState(): void {
     this.cancelHoldTimer();
+    this.cancelAudioPress();
     this.clearGestureTapTimer();
     if (this.tapTimer) {
       clearTimeout(this.tapTimer);
@@ -2088,13 +2263,37 @@ export class TouchpadCard extends LitElement {
             : nothing}
           ${this.opts.showAudioControls
             ? html`<div class="audio-stack">
-                <button class="icon-btn" title="Volume up" @click=${() => this.sendVolume('up')}>
+                <button
+                  class="icon-btn"
+                  type="button"
+                  title="Volume up"
+                  @pointerdown=${(e: PointerEvent) => this.handleAudioPointerDown(e, 'up')}
+                  @pointerup=${(e: PointerEvent) => this.handleAudioPointerUp(e, 'up')}
+                  @pointercancel=${(e: PointerEvent) => this.handleAudioPointerCancel(e)}
+                  @click=${(e: MouseEvent) => this.handleAudioClick(e, 'up')}
+                >
                   <ha-icon icon="mdi:volume-plus"></ha-icon>
                 </button>
-                <button class="icon-btn" title="Volume down" @click=${() => this.sendVolume('down')}>
+                <button
+                  class="icon-btn"
+                  type="button"
+                  title="Volume down"
+                  @pointerdown=${(e: PointerEvent) => this.handleAudioPointerDown(e, 'down')}
+                  @pointerup=${(e: PointerEvent) => this.handleAudioPointerUp(e, 'down')}
+                  @pointercancel=${(e: PointerEvent) => this.handleAudioPointerCancel(e)}
+                  @click=${(e: MouseEvent) => this.handleAudioClick(e, 'down')}
+                >
                   <ha-icon icon="mdi:volume-minus"></ha-icon>
                 </button>
-                <button class="icon-btn" title="Mute" @click=${() => this.sendVolume('mute')}>
+                <button
+                  class="icon-btn"
+                  type="button"
+                  title="Mute"
+                  @pointerdown=${(e: PointerEvent) => this.handleAudioPointerDown(e, 'mute')}
+                  @pointerup=${(e: PointerEvent) => this.handleAudioPointerUp(e, 'mute')}
+                  @pointercancel=${(e: PointerEvent) => this.handleAudioPointerCancel(e)}
+                  @click=${(e: MouseEvent) => this.handleAudioClick(e, 'mute')}
+                >
                   <ha-icon icon="mdi:volume-mute"></ha-icon>
                 </button>
               </div>`
