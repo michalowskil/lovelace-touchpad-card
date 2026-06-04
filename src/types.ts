@@ -71,6 +71,7 @@ export interface TouchpadOptionConfig {
   show_keyboard_button?: boolean;
   show_fullscreen_button?: boolean;
   show_app_buttons?: boolean;
+  hide_app_launcher_after_launch?: boolean;
   auto_focus_keyboard?: boolean;
   webos_apps?: WebOSAppConfig[];
   gesture_mode?: TouchpadGestureModeConfig;

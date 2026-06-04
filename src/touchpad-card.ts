@@ -82,6 +82,7 @@ interface TouchpadRuntimeOptions {
   showKeyboardButton: boolean;
   showFullscreenButton: boolean;
   showAppButtons: boolean;
+  hideAppLauncherAfterLaunch: boolean;
   autoFocusKeyboard: boolean;
   gestureMode: Required<TouchpadGestureModeConfig>;
   haGestureMode: Required<TouchpadHAGestureModeConfig>;
@@ -151,6 +152,7 @@ const DEFAULTS = {
   showKeyboardButton: true,
   showFullscreenButton: true,
   showAppButtons: false,
+  hideAppLauncherAfterLaunch: false,
   autoFocusKeyboard: true,
 };
 
@@ -267,6 +269,7 @@ export class TouchpadCard extends LitElement {
     showKeyboardButton: DEFAULTS.showKeyboardButton,
     showFullscreenButton: DEFAULTS.showFullscreenButton,
     showAppButtons: DEFAULTS.showAppButtons,
+    hideAppLauncherAfterLaunch: DEFAULTS.hideAppLauncherAfterLaunch,
     autoFocusKeyboard: DEFAULTS.autoFocusKeyboard,
     gestureMode: defaultGestureMode(DEFAULTS.controlsProfile),
     haGestureMode: defaultHAGestureMode(),
@@ -291,6 +294,7 @@ export class TouchpadCard extends LitElement {
       show_keyboard_button: DEFAULTS.showKeyboardButton,
       show_fullscreen_button: DEFAULTS.showFullscreenButton,
       show_app_buttons: DEFAULTS.showAppButtons,
+      hide_app_launcher_after_launch: DEFAULTS.hideAppLauncherAfterLaunch,
       auto_focus_keyboard: DEFAULTS.autoFocusKeyboard,
     };
   }
@@ -466,6 +470,10 @@ export class TouchpadCard extends LitElement {
       showKeyboardButton: device?.show_keyboard_button ?? config.show_keyboard_button ?? DEFAULTS.showKeyboardButton,
       showFullscreenButton: device?.show_fullscreen_button ?? config.show_fullscreen_button ?? DEFAULTS.showFullscreenButton,
       showAppButtons: device?.show_app_buttons ?? config.show_app_buttons ?? DEFAULTS.showAppButtons,
+      hideAppLauncherAfterLaunch:
+        device?.hide_app_launcher_after_launch ??
+        config.hide_app_launcher_after_launch ??
+        DEFAULTS.hideAppLauncherAfterLaunch,
       autoFocusKeyboard: device?.auto_focus_keyboard ?? config.auto_focus_keyboard ?? DEFAULTS.autoFocusKeyboard,
       gestureMode: this.resolveGestureMode(config, device, controlsProfile),
       haGestureMode: this.resolveHAGestureMode(config, device),
@@ -527,6 +535,7 @@ export class TouchpadCard extends LitElement {
         show_keyboard_button: config.show_keyboard_button,
         show_fullscreen_button: config.show_fullscreen_button,
         show_app_buttons: config.show_app_buttons,
+        hide_app_launcher_after_launch: config.hide_app_launcher_after_launch,
         auto_focus_keyboard: config.auto_focus_keyboard,
         gesture_mode: config.gesture_mode,
         ha_gesture_mode: config.ha_gesture_mode,
@@ -1500,6 +1509,10 @@ export class TouchpadCard extends LitElement {
     const msg: TouchpadMessage = { t: 'launch_app', app_id: appId };
     try {
       this.socket.send(JSON.stringify(msg));
+      if (this.opts.hideAppLauncherAfterLaunch && this._appLauncherOpen) {
+        this._appLauncherOpen = false;
+        this.persistUiState();
+      }
     } catch (err) {
       logCardError('Failed to launch webOS app.', err);
     }

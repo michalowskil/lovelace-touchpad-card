@@ -25,6 +25,7 @@ type BooleanOptionField =
   | 'show_keyboard_button'
   | 'show_fullscreen_button'
   | 'show_app_buttons'
+  | 'hide_app_launcher_after_launch'
   | 'auto_focus_keyboard'
   | 'invert_scroll';
 
@@ -41,6 +42,7 @@ const BOOLEAN_DEFAULTS: Record<BooleanOptionField, boolean> = {
   show_keyboard_button: true,
   show_fullscreen_button: true,
   show_app_buttons: false,
+  hide_app_launcher_after_launch: false,
   auto_focus_keyboard: true,
   invert_scroll: false,
 };
@@ -472,6 +474,7 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
   ): TemplateResult {
     const apps = this._webOSAppsValue(source);
     const showApps = this._booleanValue(source, 'show_app_buttons');
+    const hideAfterLaunch = this._booleanValue(source, 'hide_app_launcher_after_launch');
     const sourceKey = this._tvAppSourceKey(wsUrl);
     const picker = this._tvAppPicker.sourceKey === sourceKey ? this._tvAppPicker : { apps: [], loading: false };
     const existingIds = new Set(apps.map((app) => app.app_id));
@@ -489,6 +492,14 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
                 @change=${(ev: Event) => update('show_app_buttons', (ev.target as HTMLInputElement).checked)}
               />
               <span>Show webOS app button</span>
+            </label>
+            <label class="toggle">
+              <input
+                type="checkbox"
+                .checked=${hideAfterLaunch}
+                @change=${(ev: Event) => update('hide_app_launcher_after_launch', (ev.target as HTMLInputElement).checked)}
+              />
+              <span>Hide app bar after app selection</span>
             </label>
           </div>
           <div class="app-toolbar">
@@ -1126,6 +1137,7 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
       show_keyboard_button: device.show_keyboard_button,
       show_fullscreen_button: device.show_fullscreen_button,
       show_app_buttons: device.show_app_buttons,
+      hide_app_launcher_after_launch: device.hide_app_launcher_after_launch,
       auto_focus_keyboard: device.auto_focus_keyboard,
       gesture_mode: device.gesture_mode ? { ...device.gesture_mode } : rootProfile === controlsProfile ? config.gesture_mode : undefined,
       ha_gesture_mode: device.ha_gesture_mode ? { ...device.ha_gesture_mode } : config.ha_gesture_mode,
@@ -1178,6 +1190,7 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
       show_keyboard_button: BOOLEAN_DEFAULTS.show_keyboard_button,
       show_fullscreen_button: BOOLEAN_DEFAULTS.show_fullscreen_button,
       show_app_buttons: BOOLEAN_DEFAULTS.show_app_buttons,
+      hide_app_launcher_after_launch: BOOLEAN_DEFAULTS.hide_app_launcher_after_launch,
       auto_focus_keyboard: BOOLEAN_DEFAULTS.auto_focus_keyboard,
       invert_scroll: BOOLEAN_DEFAULTS.invert_scroll,
     };
@@ -1191,6 +1204,8 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
     target.show_keyboard_button = source.show_keyboard_button ?? BOOLEAN_DEFAULTS.show_keyboard_button;
     target.show_fullscreen_button = source.show_fullscreen_button ?? BOOLEAN_DEFAULTS.show_fullscreen_button;
     target.show_app_buttons = source.show_app_buttons ?? BOOLEAN_DEFAULTS.show_app_buttons;
+    target.hide_app_launcher_after_launch =
+      source.hide_app_launcher_after_launch ?? BOOLEAN_DEFAULTS.hide_app_launcher_after_launch;
     target.auto_focus_keyboard = source.auto_focus_keyboard ?? BOOLEAN_DEFAULTS.auto_focus_keyboard;
     if (source.gesture_mode) {
       target.gesture_mode = { ...source.gesture_mode };
