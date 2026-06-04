@@ -40,6 +40,7 @@ export interface TouchpadGestureModeConfig {
   swipe_up?: TouchpadGestureAction;
   swipe_down?: TouchpadGestureAction;
   tap?: TouchpadGestureAction;
+  double_tap?: TouchpadGestureAction;
   hold?: TouchpadGestureAction;
 }
 
@@ -53,6 +54,7 @@ export interface TouchpadHAGestureModeConfig {
   swipe_up?: TouchpadHAGestureAction;
   swipe_down?: TouchpadHAGestureAction;
   tap?: TouchpadHAGestureAction;
+  double_tap?: TouchpadHAGestureAction;
   hold?: TouchpadHAGestureAction;
 }
 

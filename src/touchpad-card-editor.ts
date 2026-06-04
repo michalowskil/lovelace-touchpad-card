@@ -30,7 +30,7 @@ type BooleanOptionField =
   | 'invert_scroll';
 
 type NumberOptionField = 'sensitivity' | 'scroll_multiplier' | 'double_tap_ms' | 'tap_suppression_px';
-type GestureModeActionField = 'swipe_left' | 'swipe_right' | 'swipe_up' | 'swipe_down' | 'tap' | 'hold';
+type GestureModeActionField = 'swipe_left' | 'swipe_right' | 'swipe_up' | 'swipe_down' | 'tap' | 'double_tap' | 'hold';
 type HAGestureModeActionField = GestureModeActionField;
 type GestureActionOption = { value: TouchpadGestureAction; label: string };
 
@@ -120,6 +120,7 @@ const GESTURE_MODE_FIELDS: Array<{ field: GestureModeActionField; label: string 
   { field: 'swipe_up', label: 'Swipe up' },
   { field: 'swipe_down', label: 'Swipe down' },
   { field: 'tap', label: 'Tap' },
+  { field: 'double_tap', label: 'Double tap' },
   { field: 'hold', label: 'Hold' },
 ];
 
@@ -434,6 +435,7 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
           <span class="ha-action-count">${actionCount === 1 ? '1 action' : `${actionCount} actions`}</span>
         </summary>
         <div class="ha-action-editor">
+          ${field === 'double_tap' ? this._renderDoubleTapDelayHint() : null}
           ${this._renderHAActionSelector(field, value, update)}
           <div class="button-row">
             <button class="secondary" type="button" ?disabled=${actionCount === 0} @click=${() => update({ action: 'none' })}>Clear</button>
@@ -465,6 +467,10 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
         }}
       ></ha-form>
     `;
+  }
+
+  private _renderDoubleTapDelayHint(): TemplateResult {
+    return html`<div class="gesture-hint">Using Double tap delays Tap by the double tap window.</div>`;
   }
 
   private _renderWebOSApps(
@@ -731,6 +737,7 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
               html`<option value=${optionValue} ?selected=${optionValue === value}>${optionLabel}</option>`
           )}
         </select>
+        ${field === 'double_tap' ? this._renderDoubleTapDelayHint() : null}
       </label>
     `;
   }
@@ -820,6 +827,7 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
       swipe_up: 'arrow_up',
       swipe_down: 'arrow_down',
       tap: 'enter',
+      double_tap: 'none',
       hold: profile === 'webos' ? 'back' : 'escape',
     };
   }
@@ -837,6 +845,7 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
       swipe_up: this._asGestureAction(local.swipe_up ?? root.swipe_up, defaults.swipe_up),
       swipe_down: this._asGestureAction(local.swipe_down ?? root.swipe_down, defaults.swipe_down),
       tap: this._asGestureAction(local.tap ?? root.tap, defaults.tap),
+      double_tap: this._asGestureAction(local.double_tap ?? root.double_tap, defaults.double_tap),
       hold: this._asGestureAction(local.hold ?? root.hold, defaults.hold),
     };
   }
@@ -850,6 +859,7 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
       swipe_up: { action: 'none' },
       swipe_down: { action: 'none' },
       tap: { action: 'none' },
+      double_tap: { action: 'none' },
       hold: { action: 'none' },
     };
   }
@@ -867,6 +877,7 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
       swipe_up: this._asHAGestureAction(local.swipe_up ?? root.swipe_up),
       swipe_down: this._asHAGestureAction(local.swipe_down ?? root.swipe_down),
       tap: this._asHAGestureAction(local.tap ?? root.tap),
+      double_tap: this._asHAGestureAction(local.double_tap ?? root.double_tap),
       hold: this._asHAGestureAction(local.hold ?? root.hold),
     };
   }
@@ -1031,6 +1042,7 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
       this._asGestureAction(gestureMode.swipe_up, defaults.swipe_up) === defaults.swipe_up &&
       this._asGestureAction(gestureMode.swipe_down, defaults.swipe_down) === defaults.swipe_down &&
       this._asGestureAction(gestureMode.tap, defaults.tap) === defaults.tap &&
+      this._asGestureAction(gestureMode.double_tap, defaults.double_tap) === defaults.double_tap &&
       this._asGestureAction(gestureMode.hold, defaults.hold) === defaults.hold
     );
   }
@@ -1391,6 +1403,12 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
       gap: 6px;
       font-size: 13px;
       color: var(--secondary-text-color);
+    }
+
+    .gesture-hint {
+      color: var(--secondary-text-color);
+      font-size: 12px;
+      line-height: 1.35;
     }
 
     input[type='text'],

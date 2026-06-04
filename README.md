@@ -84,13 +84,14 @@ Default mappings are:
 
 - Swipe left/right/up/down: matching arrow keys.
 - Tap: Enter / OK.
+- Double tap: disabled.
 - Hold: Back on LG webOS controls, Escape on PC controls.
 
-Each gesture can be changed in the editor. Available actions include arrows, Enter/OK, Escape, Home/End, Page Up/Page Down, and volume actions. LG webOS controls also expose Back, Power, and Settings. Use **Reverse swipe directions** if your TV/app navigation feels inverted.
+Each gesture can be changed in the editor. Available actions include arrows, Enter/OK, Escape, Home/End, Page Up/Page Down, and volume actions. LG webOS controls also expose Back, Power, and Settings. Use **Reverse swipe directions** if your TV/app navigation feels inverted. Configuring **Double tap** delays **Tap** by the double tap window so the card can tell whether a second tap follows.
 
 ## Home Assistant gesture mode
 
-Enable **Show Home Assistant gesture mode button** in the **Home Assistant gesture controls** editor section to add a second gesture toggle. This mode uses the same swipe/tap/hold detection, but executes the configured Home Assistant/Lovelace action instead of sending keys to the PC/TV backend.
+Enable **Show Home Assistant gesture mode button** in the **Home Assistant gesture controls** editor section to add a second gesture toggle. This mode uses the same swipe/tap/double-tap/hold detection, but executes the configured Home Assistant/Lovelace action instead of sending keys to the PC/TV backend.
 
 Each gesture uses Home Assistant's UI action selector, so you can configure service/action calls with targets and data from the visual editor. The saved YAML uses `ha_gesture_mode`:
 

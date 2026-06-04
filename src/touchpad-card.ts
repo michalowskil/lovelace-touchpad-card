@@ -21,7 +21,7 @@ import './touchpad-card-editor';
 
 type PointerGesture = 'move' | 'scroll' | 'gesture' | null;
 type GestureDirection = 'swipe_left' | 'swipe_right' | 'swipe_up' | 'swipe_down';
-type GestureEventName = GestureDirection | 'tap' | 'hold';
+type GestureEventName = GestureDirection | 'tap' | 'double_tap' | 'hold';
 
 interface PointerState {
   id: number;
@@ -189,6 +189,7 @@ function defaultGestureMode(profile: TouchpadControlsProfile): Required<Touchpad
     swipe_up: 'arrow_up',
     swipe_down: 'arrow_down',
     tap: 'enter',
+    double_tap: 'none',
     hold: profile === 'webos' ? 'back' : 'escape',
   };
 }
@@ -202,6 +203,7 @@ function defaultHAGestureMode(): Required<TouchpadHAGestureModeConfig> {
     swipe_up: { action: 'none' },
     swipe_down: { action: 'none' },
     tap: { action: 'none' },
+    double_tap: { action: 'none' },
     hold: { action: 'none' },
   };
 }
@@ -249,6 +251,8 @@ export class TouchpadCard extends LitElement {
   private scrollAccum = { x: 0, y: 0 };
   private lastTapTime = 0;
   private tapTimer?: number;
+  private gestureLastTapTime = 0;
+  private gestureTapTimer?: number;
   private holdTimer?: number;
   private gestureHoldFired = false;
   private dragPointerId?: number;
@@ -340,6 +344,7 @@ export class TouchpadCard extends LitElement {
       clearTimeout(this.tapTimer);
       this.tapTimer = undefined;
     }
+    this.clearGestureTapTimer();
     if (this.statusTimer) {
       clearTimeout(this.statusTimer);
       this.statusTimer = undefined;
@@ -429,6 +434,7 @@ export class TouchpadCard extends LitElement {
       swipe_up: this.normalizeGestureAction(local.swipe_up ?? root.swipe_up, defaults.swipe_up),
       swipe_down: this.normalizeGestureAction(local.swipe_down ?? root.swipe_down, defaults.swipe_down),
       tap: this.normalizeGestureAction(local.tap ?? root.tap, defaults.tap),
+      double_tap: this.normalizeGestureAction(local.double_tap ?? root.double_tap, defaults.double_tap),
       hold: this.normalizeGestureAction(local.hold ?? root.hold, defaults.hold),
     };
   }
@@ -446,6 +452,7 @@ export class TouchpadCard extends LitElement {
       swipe_up: this.normalizeHAGestureAction(local.swipe_up ?? root.swipe_up),
       swipe_down: this.normalizeHAGestureAction(local.swipe_down ?? root.swipe_down),
       tap: this.normalizeHAGestureAction(local.tap ?? root.tap),
+      double_tap: this.normalizeHAGestureAction(local.double_tap ?? root.double_tap),
       hold: this.normalizeHAGestureAction(local.hold ?? root.hold),
     };
   }
@@ -1132,6 +1139,7 @@ export class TouchpadCard extends LitElement {
     ev.preventDefault();
     this.captureLayer?.setPointerCapture(ev.pointerId);
     this.endDragIfNeeded();
+    this.cancelGestureTapTimer(false);
 
     const now = performance.now();
     this.pointers.set(ev.pointerId, {
@@ -1181,9 +1189,10 @@ export class TouchpadCard extends LitElement {
     if (beforeCount === 1 && this.gesture === 'gesture' && !this.gestureHoldFired) {
       const direction = this.gestureSwipeDirection(pointer, ev.clientX, ev.clientY);
       if (direction) {
+        this.clearGestureTapTimer();
         this.executeGesture(direction);
       } else if (dist <= this.opts.tapSuppressionPx) {
-        this.executeGesture('tap');
+        this.handleGestureModeTap(performance.now());
       }
     }
 
@@ -1199,6 +1208,7 @@ export class TouchpadCard extends LitElement {
     }
     this.cancelHoldTimer();
     if (this.pointers.size === 0) {
+      this.clearGestureTapTimer();
       this.gesture = null;
       this.gestureHoldFired = false;
     }
@@ -1212,6 +1222,7 @@ export class TouchpadCard extends LitElement {
       const dist = Math.hypot(pointer.x - pointer.startX, pointer.y - pointer.startY);
       if (this.pointers.size === 1 && this.gesture === 'gesture' && dist <= HOLD_CANCEL_PX) {
         this.gestureHoldFired = true;
+        this.clearGestureTapTimer();
         this.executeGesture('hold');
         this.hapticHold();
       }
@@ -1252,6 +1263,48 @@ export class TouchpadCard extends LitElement {
       return;
     }
     this.executeGestureAction(this.opts.gestureMode[eventName]);
+  }
+
+  private handleGestureModeTap(now: number): void {
+    if (!this.activeGestureDoubleTapConfigured()) {
+      this.executeGesture('tap');
+      return;
+    }
+
+    this.cancelGestureTapTimer(false);
+    if (this.gestureLastTapTime > 0 && now - this.gestureLastTapTime <= this.opts.doubleTapMs) {
+      this.gestureLastTapTime = 0;
+      this.executeGesture('double_tap');
+      return;
+    }
+
+    this.gestureLastTapTime = now;
+    this.gestureTapTimer = window.setTimeout(() => {
+      this.executeGesture('tap');
+      this.gestureLastTapTime = 0;
+      this.gestureTapTimer = undefined;
+    }, this.opts.doubleTapMs);
+  }
+
+  private activeGestureDoubleTapConfigured(): boolean {
+    if (this._haGestureModeActive) {
+      return this.hasHAGestureAction(this.opts.haGestureMode.double_tap);
+    }
+    return this.opts.gestureMode.double_tap !== 'none';
+  }
+
+  private cancelGestureTapTimer(resetTime = true): void {
+    if (this.gestureTapTimer) {
+      clearTimeout(this.gestureTapTimer);
+      this.gestureTapTimer = undefined;
+    }
+    if (resetTime) {
+      this.gestureLastTapTime = 0;
+    }
+  }
+
+  private clearGestureTapTimer(): void {
+    this.cancelGestureTapTimer(true);
   }
 
   private executeGestureAction(action: TouchpadGestureAction): void {
@@ -1899,6 +1952,7 @@ export class TouchpadCard extends LitElement {
 
   private resetInteractionState(): void {
     this.cancelHoldTimer();
+    this.clearGestureTapTimer();
     if (this.tapTimer) {
       clearTimeout(this.tapTimer);
       this.tapTimer = undefined;
@@ -1915,6 +1969,7 @@ export class TouchpadCard extends LitElement {
     this.gesture = null;
     this.gestureHoldFired = false;
     this.lastTapTime = 0;
+    this.gestureLastTapTime = 0;
     this.lockedPan = undefined;
     this.moveAccum = { x: 0, y: 0 };
     this.scrollAccum = { x: 0, y: 0 };
