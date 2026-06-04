@@ -48,6 +48,18 @@ type FullscreenCapableDocument = Document & {
   webkitExitFullscreen?: () => Promise<void> | void;
 };
 
+interface FullscreenScrollTarget {
+  element: Element;
+  left: number;
+  top: number;
+}
+
+interface FullscreenScrollSnapshot {
+  windowX: number;
+  windowY: number;
+  targets: FullscreenScrollTarget[];
+}
+
 interface ResolvedTouchpadDevice extends TouchpadDeviceConfig {
   id: string;
   name: string;
@@ -224,6 +236,10 @@ export class TouchpadCard extends LitElement {
   private reconnectDelayMs = RECONNECT_BASE_MS;
   private socketGeneration = 0;
   private fullscreenMode: FullscreenMode = null;
+  private fullscreenScrollSnapshot?: FullscreenScrollSnapshot;
+  private fullscreenRestoreFrame?: number;
+  private fullscreenRestoreFrame2?: number;
+  private fullscreenRestoreToken = 0;
 
   private pointers = new Map<number, PointerState>();
   private gesture: PointerGesture = null;
@@ -332,6 +348,8 @@ export class TouchpadCard extends LitElement {
       clearTimeout(this.holdTimer);
       this.holdTimer = undefined;
     }
+    this.cancelFullscreenScrollRestore();
+    this.fullscreenScrollSnapshot = undefined;
     if (this.dragPointerId != null) {
       this.sendButton('up');
       this.dragPointerId = undefined;
@@ -1633,12 +1651,14 @@ export class TouchpadCard extends LitElement {
     if (this.fullscreenMode === 'native') {
       this.fullscreenMode = null;
       this._fullscreenActive = false;
+      this.scheduleFullscreenScrollRestore();
     }
   };
 
   private enterFullscreen = async (): Promise<void> => {
     if (this._fullscreenActive) return;
 
+    this.captureFullscreenScroll();
     this.resetInteractionState();
     const nativeRequest = this.requestNativeFullscreen();
     if (nativeRequest) {
@@ -1675,12 +1695,110 @@ export class TouchpadCard extends LitElement {
         }
       }
     }
+
+    this.scheduleFullscreenScrollRestore();
   };
 
   private toggleFullscreen = (ev: Event): void => {
     ev.stopPropagation();
     void (this._fullscreenActive ? this.exitFullscreen() : this.enterFullscreen());
   };
+
+  private captureFullscreenScroll(): void {
+    const targets: FullscreenScrollTarget[] = [];
+    const seen = new Set<Element>();
+    let node: Node | null = this;
+
+    while (node) {
+      const element = node instanceof ShadowRoot ? node.host : node instanceof Element ? node : null;
+      if (element && !seen.has(element)) {
+        seen.add(element);
+        if (this.shouldRestoreScroll(element)) {
+          targets.push({ element, left: element.scrollLeft, top: element.scrollTop });
+        }
+      }
+      node = this.composedParentNode(node);
+    }
+
+    const scrollingElement = document.scrollingElement;
+    if (scrollingElement && !seen.has(scrollingElement)) {
+      targets.push({ element: scrollingElement, left: scrollingElement.scrollLeft, top: scrollingElement.scrollTop });
+    }
+
+    this.fullscreenScrollSnapshot = {
+      windowX: window.scrollX,
+      windowY: window.scrollY,
+      targets,
+    };
+  }
+
+  private composedParentNode(node: Node): Node | null {
+    if (node.parentNode) {
+      return node.parentNode;
+    }
+    const root = node.getRootNode();
+    if (root instanceof ShadowRoot && root !== node) {
+      return root.host;
+    }
+    if (node instanceof ShadowRoot) {
+      return node.host;
+    }
+    return null;
+  }
+
+  private shouldRestoreScroll(element: Element): boolean {
+    if (element.scrollLeft !== 0 || element.scrollTop !== 0) {
+      return true;
+    }
+    const style = window.getComputedStyle(element);
+    const scrollableY = /(auto|scroll|overlay)/.test(style.overflowY) && element.scrollHeight > element.clientHeight;
+    const scrollableX = /(auto|scroll|overlay)/.test(style.overflowX) && element.scrollWidth > element.clientWidth;
+    return scrollableX || scrollableY;
+  }
+
+  private scheduleFullscreenScrollRestore(): void {
+    const snapshot = this.fullscreenScrollSnapshot;
+    if (!snapshot) return;
+
+    this.fullscreenScrollSnapshot = undefined;
+    this.cancelFullscreenScrollRestore();
+    const token = this.fullscreenRestoreToken;
+
+    void this.updateComplete.then(() => {
+      if (!this.isConnected || token !== this.fullscreenRestoreToken) return;
+      this.fullscreenRestoreFrame = window.requestAnimationFrame(() => {
+        if (token !== this.fullscreenRestoreToken) return;
+        this.fullscreenRestoreFrame = undefined;
+        this.restoreFullscreenScroll(snapshot);
+        this.fullscreenRestoreFrame2 = window.requestAnimationFrame(() => {
+          if (token !== this.fullscreenRestoreToken) return;
+          this.fullscreenRestoreFrame2 = undefined;
+          this.restoreFullscreenScroll(snapshot);
+        });
+      });
+    });
+  }
+
+  private cancelFullscreenScrollRestore(): void {
+    this.fullscreenRestoreToken += 1;
+    if (this.fullscreenRestoreFrame != null) {
+      window.cancelAnimationFrame(this.fullscreenRestoreFrame);
+      this.fullscreenRestoreFrame = undefined;
+    }
+    if (this.fullscreenRestoreFrame2 != null) {
+      window.cancelAnimationFrame(this.fullscreenRestoreFrame2);
+      this.fullscreenRestoreFrame2 = undefined;
+    }
+  }
+
+  private restoreFullscreenScroll(snapshot: FullscreenScrollSnapshot): void {
+    snapshot.targets.forEach(({ element, left, top }) => {
+      if (!element.isConnected) return;
+      element.scrollLeft = left;
+      element.scrollTop = top;
+    });
+    window.scrollTo(snapshot.windowX, snapshot.windowY);
+  }
 
   private toggleLock = (): void => {
     if (!this._locked && this.dragPointerId != null) {
