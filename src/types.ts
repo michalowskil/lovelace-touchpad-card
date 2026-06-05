@@ -1,6 +1,6 @@
 import { LovelaceCardConfig } from 'custom-card-helpers';
 
-export type TouchpadControlsProfile = 'pc' | 'webos';
+export type TouchpadControlsProfile = 'pc' | 'webos' | 'home_assistant';
 export type TouchpadThemeMode = 'auto' | 'dark' | 'light';
 
 export interface WebOSAppConfig {

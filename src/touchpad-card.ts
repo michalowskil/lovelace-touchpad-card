@@ -187,7 +187,7 @@ const GESTURE_ACTIONS = new Set<TouchpadGestureAction>([
 
 function defaultGestureMode(profile: TouchpadControlsProfile): Required<TouchpadGestureModeConfig> {
   return {
-    show_button: true,
+    show_button: profile !== 'home_assistant',
     invert_swipes: false,
     swipe_left: 'arrow_left',
     swipe_right: 'arrow_right',
@@ -398,7 +398,10 @@ export class TouchpadCard extends LitElement {
   }
 
   private normalizeControlsProfile(profile?: TouchpadControlsProfile): TouchpadControlsProfile {
-    return profile === 'webos' ? 'webos' : DEFAULTS.controlsProfile;
+    if (profile === 'webos' || profile === 'home_assistant') {
+      return profile;
+    }
+    return DEFAULTS.controlsProfile;
   }
 
   private normalizeThemeMode(themeMode?: TouchpadThemeMode): TouchpadThemeMode {
@@ -415,6 +418,17 @@ export class TouchpadCard extends LitElement {
 
   private configuredControlsProfile(config: Pick<TouchpadDeviceConfig, 'controls_profile' | 'backend'>): TouchpadControlsProfile | undefined {
     return config.controls_profile ?? config.backend;
+  }
+
+  private defaultDeviceName(profile: TouchpadControlsProfile): string {
+    switch (profile) {
+      case 'webos':
+        return 'TV';
+      case 'home_assistant':
+        return 'Home Assistant';
+      default:
+        return 'PC';
+    }
   }
 
   private normalizeGestureAction(action: TouchpadGestureAction | undefined, fallback: TouchpadGestureAction): TouchpadGestureAction {
@@ -516,6 +530,10 @@ export class TouchpadCard extends LitElement {
     const controlsProfile = this.normalizeControlsProfile(
       this.configuredControlsProfile(device ?? config) ?? this.configuredControlsProfile(config)
     );
+    const audioControls = this.resolveAudioControls(config, device);
+    if (controlsProfile === 'home_assistant') {
+      audioControls.mode = 'home_assistant';
+    }
     return {
       themeMode: this.normalizeThemeMode(config.theme_mode),
       controlsProfile,
@@ -525,18 +543,18 @@ export class TouchpadCard extends LitElement {
       doubleTapMs: device?.double_tap_ms ?? config.double_tap_ms ?? DEFAULTS.doubleTapMs,
       tapSuppressionPx: device?.tap_suppression_px ?? config.tap_suppression_px ?? DEFAULTS.tapSuppressionPx,
       showLock: device?.show_lock ?? config.show_lock ?? DEFAULTS.showLock,
-      showSpeedButtons: device?.show_speed_buttons ?? config.show_speed_buttons ?? DEFAULTS.showSpeedButtons,
-      showStatusText: device?.show_status_text ?? config.show_status_text ?? DEFAULTS.showStatusText,
+      showSpeedButtons: controlsProfile === 'home_assistant' ? false : device?.show_speed_buttons ?? config.show_speed_buttons ?? DEFAULTS.showSpeedButtons,
+      showStatusText: controlsProfile === 'home_assistant' ? false : device?.show_status_text ?? config.show_status_text ?? DEFAULTS.showStatusText,
       showAudioControls: device?.show_audio_controls ?? config.show_audio_controls ?? DEFAULTS.showAudioControls,
-      showKeyboardButton: device?.show_keyboard_button ?? config.show_keyboard_button ?? DEFAULTS.showKeyboardButton,
+      showKeyboardButton: controlsProfile === 'home_assistant' ? false : device?.show_keyboard_button ?? config.show_keyboard_button ?? DEFAULTS.showKeyboardButton,
       showFullscreenButton: device?.show_fullscreen_button ?? config.show_fullscreen_button ?? DEFAULTS.showFullscreenButton,
-      showAppButtons: device?.show_app_buttons ?? config.show_app_buttons ?? DEFAULTS.showAppButtons,
+      showAppButtons: controlsProfile === 'home_assistant' ? false : device?.show_app_buttons ?? config.show_app_buttons ?? DEFAULTS.showAppButtons,
       hideAppLauncherAfterLaunch:
         device?.hide_app_launcher_after_launch ??
         config.hide_app_launcher_after_launch ??
         DEFAULTS.hideAppLauncherAfterLaunch,
       autoFocusKeyboard: device?.auto_focus_keyboard ?? config.auto_focus_keyboard ?? DEFAULTS.autoFocusKeyboard,
-      audioControls: this.resolveAudioControls(config, device),
+      audioControls,
       gestureMode: this.resolveGestureMode(config, device, controlsProfile),
       haGestureMode: this.resolveHAGestureMode(config, device),
       webosApps: normalizeWebOSApps(webosApps ?? DEFAULT_WEBOS_APPS),
@@ -549,11 +567,14 @@ export class TouchpadCard extends LitElement {
       return config.devices.map((device, index) => {
         const id = String(device?.id ?? '').trim();
         const wsUrl = String(device?.wsUrl ?? '').trim();
+        const controlsProfile = this.normalizeControlsProfile(
+          this.configuredControlsProfile(device) ?? this.configuredControlsProfile(config)
+        );
 
         if (!id) {
           throw new Error(`devices[${index}].id is required`);
         }
-        if (!wsUrl) {
+        if (!wsUrl && controlsProfile !== 'home_assistant') {
           throw new Error(`devices[${index}].wsUrl is required`);
         }
         if (seen.has(id)) {
@@ -567,21 +588,20 @@ export class TouchpadCard extends LitElement {
           id,
           name,
           wsUrl,
-          controlsProfile: this.normalizeControlsProfile(this.configuredControlsProfile(device) ?? this.configuredControlsProfile(config)),
+          controlsProfile,
         };
       });
     }
 
     const wsUrl = String(config.wsUrl ?? '').trim();
-    if (!wsUrl) {
+    const controlsProfile = this.normalizeControlsProfile(this.configuredControlsProfile(config));
+    if (!wsUrl && controlsProfile !== 'home_assistant') {
       throw new Error('Either wsUrl or devices is required');
     }
-
-    const controlsProfile = this.normalizeControlsProfile(this.configuredControlsProfile(config));
     return [
       {
         id: 'default',
-        name: controlsProfile === 'webos' ? 'TV' : 'PC',
+        name: this.defaultDeviceName(controlsProfile),
         wsUrl,
         controlsProfile,
         controls_profile: controlsProfile,
@@ -637,6 +657,10 @@ export class TouchpadCard extends LitElement {
     if (!this.canShowAppLauncherToggle()) {
       this._appLauncherOpen = false;
     }
+    if (this.opts.controlsProfile === 'home_assistant') {
+      this._gestureModeActive = false;
+      this._haGestureModeActive = false;
+    }
     if (!this.opts.gestureMode.show_button) {
       this._gestureModeActive = false;
     }
@@ -665,6 +689,13 @@ export class TouchpadCard extends LitElement {
   private connect(): void {
     const generation = ++this.socketGeneration;
     this.teardownSocket(false);
+
+    if (this.opts.controlsProfile === 'home_assistant') {
+      this.wsErrorNotified = false;
+      this.setStatus('connected', true);
+      this.requestUpdate();
+      return;
+    }
 
     const device = this.activeDevice;
     const wsUrl = String(device?.wsUrl ?? '').trim();
@@ -717,7 +748,7 @@ export class TouchpadCard extends LitElement {
   }
 
   private scheduleReconnect(): void {
-    if (!this._config || this.reconnectTimer) {
+    if (!this._config || this.reconnectTimer || this.opts.controlsProfile === 'home_assistant') {
       return;
     }
 
@@ -1026,6 +1057,9 @@ export class TouchpadCard extends LitElement {
   }
 
   private gestureModeActive(): boolean {
+    if (this.opts.controlsProfile === 'home_assistant') {
+      return !this._locked;
+    }
     return this._gestureModeActive || this._haGestureModeActive;
   }
 
@@ -1299,7 +1333,10 @@ export class TouchpadCard extends LitElement {
 
     const direction: GestureDirection =
       Math.abs(dx) >= Math.abs(dy) ? (dx < 0 ? 'swipe_left' : 'swipe_right') : dy < 0 ? 'swipe_up' : 'swipe_down';
-    const invertSwipes = this._haGestureModeActive ? this.opts.haGestureMode.invert_swipes : this.opts.gestureMode.invert_swipes;
+    const invertSwipes =
+      this.opts.controlsProfile === 'home_assistant' || this._haGestureModeActive
+        ? this.opts.haGestureMode.invert_swipes
+        : this.opts.gestureMode.invert_swipes;
     return invertSwipes ? this.invertedGestureDirection(direction) : direction;
   }
 
@@ -1317,7 +1354,7 @@ export class TouchpadCard extends LitElement {
   }
 
   private executeGesture(eventName: GestureEventName): void {
-    if (this._haGestureModeActive) {
+    if (this.opts.controlsProfile === 'home_assistant' || this._haGestureModeActive) {
       this.executeHAGesture(eventName);
       return;
     }
@@ -1346,7 +1383,7 @@ export class TouchpadCard extends LitElement {
   }
 
   private activeGestureDoubleTapConfigured(): boolean {
-    if (this._haGestureModeActive) {
+    if (this.opts.controlsProfile === 'home_assistant' || this._haGestureModeActive) {
       return this.hasHAGestureAction(this.opts.haGestureMode.double_tap);
     }
     return this.opts.gestureMode.double_tap !== 'none';
@@ -2154,7 +2191,7 @@ export class TouchpadCard extends LitElement {
     if (this._devices.length > 1) {
       return this.activeDevice?.name ?? 'Device';
     }
-    return this.opts.controlsProfile === 'webos' ? 'TV' : 'PC';
+    return this.defaultDeviceName(this.opts.controlsProfile);
   }
 
   private statusLabel(): string {
@@ -2181,6 +2218,7 @@ export class TouchpadCard extends LitElement {
     const showKeyboardSection = this.opts.showKeyboardButton && this._keyboardOpen;
     const showDeviceTabs = this._devices.length > 1;
     const isWebos = this.opts.controlsProfile === 'webos';
+    const isHAOnly = this.opts.controlsProfile === 'home_assistant';
     const showAppLauncherToggle = this.canShowAppLauncherToggle();
     const showAppLauncher = showAppLauncherToggle && this._appLauncherOpen;
     const themeClass = `theme-${this.effectiveThemeMode()}`;
@@ -2318,9 +2356,9 @@ export class TouchpadCard extends LitElement {
                 <ha-icon icon="mdi:apps"></ha-icon>
               </button>`
             : nothing}
-          ${this.opts.showFullscreenButton || this.opts.gestureMode.show_button || this.opts.haGestureMode.show_button
+          ${this.opts.showFullscreenButton || (!isHAOnly && (this.opts.gestureMode.show_button || this.opts.haGestureMode.show_button))
             ? html`<div class="mode-toggles">
-                ${this.opts.gestureMode.show_button
+                ${!isHAOnly && this.opts.gestureMode.show_button
                   ? html`<button
                       class="gesture-toggle ${this._gestureModeActive ? 'active' : ''}"
                       type="button"
@@ -2344,7 +2382,7 @@ export class TouchpadCard extends LitElement {
                       <ha-icon icon=${this._fullscreenActive ? 'mdi:fullscreen-exit' : 'mdi:fullscreen'}></ha-icon>
                     </button>`
                   : nothing}
-                ${this.opts.haGestureMode.show_button
+                ${!isHAOnly && this.opts.haGestureMode.show_button
                   ? html`<button
                       class="ha-gesture-toggle ${this._haGestureModeActive ? 'active' : ''}"
                       type="button"
@@ -2369,7 +2407,7 @@ export class TouchpadCard extends LitElement {
           ></div>
           ${this.opts.showStatusText
             ? html`<div class="status">
-                ${this.statusLabel()}${this._locked ? ' (Locked)' : ''}${this._gestureModeActive ? ' (Gestures)' : ''}${this._haGestureModeActive
+                ${this.statusLabel()}${this._locked ? ' (Locked)' : ''}${!isHAOnly && this._gestureModeActive ? ' (Gestures)' : ''}${!isHAOnly && this._haGestureModeActive
                   ? ' (HA Gestures)'
                   : ''}
               </div>`
@@ -3062,6 +3100,7 @@ if (!window.customCards.find((c) => c.type === 'touchpad-card')) {
   window.customCards.push({
     type: 'touchpad-card',
     name: 'Lovelace Touchpad Card',
-    description: 'Control your PC or LG webOS TV from Home Assistant with a touchpad, keyboard, volume controls, and gestures for devices or Home Assistant actions.',
+    description:
+      'Control your MS Windows PC, LG webOS TV, or Home Assistant entities with a touchpad, keyboard, volume controls, and configurable actions.',
   });
 }

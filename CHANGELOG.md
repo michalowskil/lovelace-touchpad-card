@@ -1,5 +1,8 @@
 # Card Changelog
 
+## 0.13.0
+- Added a Home Assistant only controls profile for action-based remotes without a Windows or LG webOS backend.
+
 ## 0.12.0
 - Added an Audio controls editor section with selectable device-volume or Home Assistant action modes.
 - Added separate Tap and Hold Home Assistant actions for Volume up, Volume down, and Mute audio buttons.

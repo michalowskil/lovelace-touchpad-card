@@ -234,6 +234,7 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
   }
 
   private _renderSingleDeviceConfig(config: TouchpadCardConfig): TemplateResult {
+    const controlsProfile = this._controlsProfileValue(config);
     return html`
       <section class="config-section">
         <div class="section-header">
@@ -244,13 +245,15 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
         </div>
 
         <div class="fields">
-          ${this._renderTextField('WebSocket URL', config.wsUrl ?? '', 'ws://YOUR-PC-LAN-IP:8765', (value) =>
-            this._updateRootField('wsUrl', value)
-          )}
-          ${this._renderControlsProfileField(this._controlsProfileValue(config), (value) => this._updateRootField('controls_profile', value))}
+          ${this._renderControlsProfileField(controlsProfile, (value) => this._updateRootField('controls_profile', value))}
+          ${controlsProfile === 'home_assistant'
+            ? null
+            : this._renderTextField('WebSocket URL', config.wsUrl ?? '', 'ws://YOUR-PC-LAN-IP:8765', (value) =>
+                this._updateRootField('wsUrl', value)
+              )}
         </div>
 
-        ${this._renderOptions(config, this._controlsProfileValue(config), config.wsUrl ?? '', (field, value) =>
+        ${this._renderOptions(config, controlsProfile, config.wsUrl ?? '', (field, value) =>
           this._updateRootField(field, value)
         )}
       </section>
@@ -297,6 +300,7 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
   }
 
   private _renderDeviceConfig(device: TouchpadDeviceConfig, index: number, deviceCount: number): TemplateResult {
+    const controlsProfile = this._controlsProfileValue(device);
     return html`
       <div class="device-config">
         <div class="device-header">
@@ -308,15 +312,17 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
           ${this._renderTextField('Display name', device.name ?? '', 'Salon', (value) =>
             this._updateDeviceName(index, value)
           )}
-          ${this._renderTextField('WebSocket URL', device.wsUrl ?? '', 'ws://homeassistant.local:8778', (value) =>
-            this._updateDeviceField(index, 'wsUrl', value)
-          )}
-          ${this._renderControlsProfileField(this._controlsProfileValue(device), (value) =>
+          ${this._renderControlsProfileField(controlsProfile, (value) =>
             this._updateDeviceField(index, 'controls_profile', value)
           )}
+          ${controlsProfile === 'home_assistant'
+            ? null
+            : this._renderTextField('WebSocket URL', device.wsUrl ?? '', 'ws://homeassistant.local:8778', (value) =>
+                this._updateDeviceField(index, 'wsUrl', value)
+              )}
         </div>
 
-        ${this._renderOptions(device, this._controlsProfileValue(device), device.wsUrl ?? '', (field, value) =>
+        ${this._renderOptions(device, controlsProfile, device.wsUrl ?? '', (field, value) =>
           this._updateDeviceField(index, field, value)
         )}
       </div>
@@ -329,7 +335,22 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
     wsUrl: string,
     update: (field: keyof TouchpadOptionConfig, value: unknown) => void
   ): TemplateResult {
-    const booleanFields = BOOLEAN_FIELDS.filter(({ field }) => field !== 'show_app_buttons' && field !== 'show_audio_controls');
+    const isHAOnly = controlsProfile === 'home_assistant';
+    const booleanFields = BOOLEAN_FIELDS.filter(
+      ({ field }) =>
+        field !== 'show_app_buttons' &&
+        field !== 'show_audio_controls' &&
+        !(
+          isHAOnly &&
+          (field === 'show_speed_buttons' ||
+            field === 'show_status_text' ||
+            field === 'show_keyboard_button' ||
+            field === 'auto_focus_keyboard')
+        )
+    );
+    const numberFields = NUMBER_FIELDS.filter(
+      ({ field }) => !isHAOnly || (field !== 'sensitivity' && field !== 'scroll_multiplier')
+    );
     const showWebOSAppSection = controlsProfile === 'webos';
 
     return html`
@@ -353,16 +374,16 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
         </div>
       </details>
 
-      ${this._renderAudioControls(source, update)}
+      ${this._renderAudioControls(source, controlsProfile, update)}
       ${showWebOSAppSection ? this._renderWebOSApps(source, wsUrl, update) : null}
-      ${this._renderGestureMode(source, controlsProfile, (gestureMode) => update('gesture_mode', gestureMode))}
-      ${this._renderHAGestureMode(source, (gestureMode) => update('ha_gesture_mode', gestureMode))}
+      ${isHAOnly ? null : this._renderGestureMode(source, controlsProfile, (gestureMode) => update('gesture_mode', gestureMode))}
+      ${this._renderHAGestureMode(source, controlsProfile, (gestureMode) => update('ha_gesture_mode', gestureMode))}
 
       <details class="option-group collapsible">
         <summary>Touchpad tuning</summary>
         <div class="collapsible-content">
           <div class="fields">
-            ${NUMBER_FIELDS.map(({ field, label, step }) =>
+            ${numberFields.map(({ field, label, step }) =>
               this._renderNumberField(label, this._numberValue(source, field), NUMBER_DEFAULTS[field], step, (value) => update(field, value))
             )}
           </div>
@@ -381,11 +402,14 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
 
   private _renderAudioControls(
     source: TouchpadOptionConfig,
+    controlsProfile: TouchpadControlsProfile,
     update: (field: keyof TouchpadOptionConfig, value: unknown) => void
   ): TemplateResult {
+    const isHAOnly = controlsProfile === 'home_assistant';
     const audioControls = this._audioControlsValue(source);
+    const audioMode = isHAOnly ? 'home_assistant' : audioControls.mode;
     const updateAudioControls = (patch: Partial<TouchpadAudioControlsConfig>) =>
-      update('audio_controls', { ...audioControls, ...patch });
+      update('audio_controls', { ...audioControls, mode: audioMode, ...patch });
 
     return html`
       <details class="option-group collapsible">
@@ -401,20 +425,22 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
               <span>Show audio icons</span>
             </label>
           </div>
-          <div class="fields">
-            <label class="field">
-              <span>Audio button actions</span>
-              <select
-                .value=${audioControls.mode}
-                @change=${(ev: Event) =>
-                  updateAudioControls({ mode: this._asAudioControlsMode((ev.target as HTMLSelectElement).value) })}
-              >
-                <option value="device">Device volume controls</option>
-                <option value="home_assistant">Home Assistant actions</option>
-              </select>
-            </label>
-          </div>
-          ${audioControls.mode === 'home_assistant'
+          ${isHAOnly
+            ? null
+            : html`<div class="fields">
+                <label class="field">
+                  <span>Audio button actions</span>
+                  <select
+                    .value=${audioMode}
+                    @change=${(ev: Event) =>
+                      updateAudioControls({ mode: this._asAudioControlsMode((ev.target as HTMLSelectElement).value) })}
+                  >
+                    <option value="device">Device volume controls</option>
+                    <option value="home_assistant">Home Assistant actions</option>
+                  </select>
+                </label>
+              </div>`}
+          ${audioMode === 'home_assistant'
             ? html`<div class="ha-gesture-actions audio-actions">
                 ${AUDIO_ACTION_FIELDS.map(({ field, button, event, label }) =>
                   this._renderHAActionField(field, label, audioControls[button][event], (value) =>
@@ -470,8 +496,10 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
 
   private _renderHAGestureMode(
     source: TouchpadOptionConfig,
+    controlsProfile: TouchpadControlsProfile,
     update: (gestureMode: TouchpadHAGestureModeConfig) => void
   ): TemplateResult {
+    const isHAOnly = controlsProfile === 'home_assistant';
     const gestureMode = this._haGestureModeValue(source);
     const updateGestureMode = (patch: Partial<TouchpadHAGestureModeConfig>) => update({ ...gestureMode, ...patch });
 
@@ -480,14 +508,16 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
         <summary>Home Assistant gesture controls</summary>
         <div class="collapsible-content">
           <div class="toggles">
-            <label class="toggle">
-              <input
-                type="checkbox"
-                .checked=${gestureMode.show_button}
-                @change=${(ev: Event) => updateGestureMode({ show_button: (ev.target as HTMLInputElement).checked })}
-              />
-              <span>Show Home Assistant gesture mode button</span>
-            </label>
+            ${isHAOnly
+              ? null
+              : html`<label class="toggle">
+                  <input
+                    type="checkbox"
+                    .checked=${gestureMode.show_button}
+                    @change=${(ev: Event) => updateGestureMode({ show_button: (ev.target as HTMLInputElement).checked })}
+                  />
+                  <span>Show Home Assistant gesture mode button</span>
+                </label>`}
             <label class="toggle">
               <input
                 type="checkbox"
@@ -863,8 +893,9 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
       <label class="field">
         <span>Controls profile</span>
         <select .value=${value} @change=${(ev: Event) => update(this._asControlsProfile((ev.target as HTMLSelectElement).value))}>
-          <option value="pc">PC controls</option>
-          <option value="webos">LG webOS controls</option>
+          <option value="pc">MS Windows</option>
+          <option value="webos">LG webOS</option>
+          <option value="home_assistant">Home Assistant only</option>
         </select>
       </label>
     `;
@@ -1071,7 +1102,10 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
   }
 
   private _asControlsProfile(value: string): TouchpadControlsProfile {
-    return value === 'webos' ? 'webos' : 'pc';
+    if (value === 'webos' || value === 'home_assistant') {
+      return value;
+    }
+    return 'pc';
   }
 
   private _asThemeMode(value: string): TouchpadThemeMode {
@@ -1162,6 +1196,10 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
     previousProfile: TouchpadControlsProfile,
     nextProfile: TouchpadControlsProfile
   ): void {
+    if (nextProfile === 'home_assistant') {
+      delete target.gesture_mode;
+      return;
+    }
     if (previousProfile === nextProfile) {
       return;
     }
@@ -1308,7 +1346,7 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
 
   private _singleConfigToDevice(config: TouchpadCardConfig): TouchpadDeviceConfig {
     const controlsProfile = this._asControlsProfile(config.controls_profile ?? config.backend ?? 'pc');
-    const name = controlsProfile === 'webos' ? 'TV' : 'PC';
+    const name = this._defaultDeviceName(controlsProfile);
     const id = this._uniqueDeviceId(name, []);
     const device = this._withDefaultOptions({
       id,
@@ -1419,10 +1457,21 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
     if (duplicateIds.length > 0) {
       messages.push('Device display names need to generate unique internal IDs.');
     }
-    if (devices.some((device) => !String(device.wsUrl ?? '').trim())) {
+    if (devices.some((device) => this._controlsProfileValue(device) !== 'home_assistant' && !String(device.wsUrl ?? '').trim())) {
       messages.push('Every device needs a WebSocket URL.');
     }
     return messages;
+  }
+
+  private _defaultDeviceName(profile: TouchpadControlsProfile): string {
+    switch (profile) {
+      case 'webos':
+        return 'TV';
+      case 'home_assistant':
+        return 'Home Assistant';
+      default:
+        return 'PC';
+    }
   }
 
   private _assign(target: object, field: string | number | symbol, value: unknown): void {

@@ -1,6 +1,6 @@
 {
   "name": "touchpad",
-  "version": "0.12.0",
+  "version": "0.13.0",
   "main": "dist/touchpad-card.js",
   "scripts": {
     "build": "node ./scripts/build.js",
@@ -14,7 +14,7 @@
   ],
   "author": "Custom Touchpad Card",
   "license": "CC-BY-NC-ND-4.0",
-  "description": "Control your PC or LG webOS TV from Home Assistant with a touchpad, keyboard, volume controls, and gestures for devices or Home Assistant actions.",
+  "description": "Control your MS Windows PC, LG webOS TV, or Home Assistant entities with a touchpad, keyboard, volume controls, and configurable actions.",
   "dependencies": {
     "custom-card-helpers": "^1.9.0",
     "lit": "^3.3.2"
