@@ -1,9 +1,9 @@
 # Card Changelog
 
-## Unreleased
+## 0.14.0
 - Renamed the webOS app buttons editor section to App and action shortcuts.
-- Added one ordered `shortcuts` list for mixed TV app and Home Assistant action shortcuts.
 - Added configurable Home Assistant action shortcuts with custom names and icons.
+- Added one ordered `shortcuts` list for mixed TV app and Home Assistant action shortcuts.
 - Added `show_shortcut_launcher` and `hide_shortcut_launcher_after_selection`; existing webOS app shortcut YAML remains supported.
 
 ## 0.13.0
