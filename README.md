@@ -12,7 +12,7 @@ If you like this project, please consider giving it a ⭐ on GitHub: [![Star on 
 ## Features
 
 - Touchpad control for MS Windows or LG webOS, including pointer movement, clicks, scrolling, and drag/select.
-- Keyboard panel, volume controls, speed presets, lock mode, fullscreen mode, and optional webOS app launcher.
+- Keyboard panel, volume controls, speed presets, lock mode, fullscreen mode, and optional app/action shortcut launcher.
 - Device gesture controls plus a Home Assistant only profile for `perform-action` gestures without a WebSocket backend.
 - Multi-device support with per-device/view UI state.
 - LAN or remote WebSocket connection with `ws://` or `wss://`.
@@ -192,28 +192,41 @@ audio_controls:
 
 In **Home Assistant only** profile, audio buttons always use Home Assistant actions.
 
-## Optional webOS App Button
+## App and action shortcuts
 
-For a webOS device, set **Controls profile** to **LG webOS** and enable **Show webOS app button** in the card editor. The card then shows an app toggle next to the keyboard toggle; tapping it shows or hides the configured app buttons below the touchpad surface.
+Enable **Show shortcut launcher** in the **App and action shortcuts** editor section. The card then shows a shortcut toggle next to the keyboard toggle when at least one shortcut is configured; tapping it shows or hides the shortcut bar below the touchpad surface.
 
-When the bridge can read the TV app list, buttons for apps that are not installed are shown dimmed. If the TV cannot provide that list, the buttons stay clickable; a failed launch shows a short message and dims that app for the current session.
+In **LG webOS** profile, this section supports TV app shortcuts and Home Assistant action shortcuts in one ordered list. In **MS Windows** and **Home Assistant only** profiles, it shows only action shortcuts.
 
-You can add apps manually, or use **Add from TV** in the editor. **Add from TV** asks the configured bridge for the TV's installed app list. If the TV provides it, pick the apps you want to add; if it does not, keep using manual entries.
+For webOS apps, the bridge can read the TV app list when the TV exposes it. Buttons for apps that are not installed are shown dimmed. If the TV cannot provide that list, the buttons stay clickable; a failed launch shows a short message and dims that app for the current session.
+
+You can add webOS apps manually with **Add TV app**, or use **Add from TV** in the editor. **Add from TV** asks the configured bridge for the TV's installed app list. If the TV provides it, pick the apps you want to add; if it does not, keep using manual entries.
 
 App IDs can vary between TV models, regions, or app version. Therefore, the card allows you to enter any app ID.
 
-Each app needs `app_id` and at least one visible value: `name` or `icon`. That means all of these are valid:
+Each webOS app shortcut needs `type: webos_app`, `app_id`, and at least one visible value: `name` or `icon`. Action shortcuts use `type: action` and can have their own label and icon:
 
 ```yaml
-webos_apps:
+show_shortcut_launcher: true
+shortcuts:
   - name: YouTube
+    type: webos_app
     app_id: youtube.leanback.v4
     icon: mdi:youtube
-  - app_id: spotify-beehive
+  - type: action
+    name: Lights
+    icon: mdi:lightbulb
+    action:
+      action: perform-action
+      perform_action: light.toggle
+      target:
+        entity_id: light.living_room
+  - type: webos_app
+    app_id: spotify-beehive
     icon: mdi:spotify
-  - name: HDMI 1
-    app_id: com.webos.app.hdmi1
 ```
+
+`show_app_buttons`, `hide_app_launcher_after_launch`, `webos_apps`, and `action_shortcuts` remain supported as legacy YAML aliases. Use `shortcuts` when you want to control mixed TV app/action ordering.
 
 ## Remote access over HTTPS/WSS
 

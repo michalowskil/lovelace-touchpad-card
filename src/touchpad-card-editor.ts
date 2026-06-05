@@ -4,6 +4,7 @@ import { customElement, property, state } from 'lit/decorators.js';
 import { fireEvent, HomeAssistant, LovelaceCardEditor } from 'custom-card-helpers';
 import {
   ResolvedTouchpadAudioControlsConfig,
+  TouchpadActionShortcutConfig,
   TouchpadAudioActionEvent,
   TouchpadAudioButtonField,
   TouchpadAudioControlsConfig,
@@ -17,6 +18,7 @@ import {
   TouchpadGestureModeConfig,
   TouchpadOptionConfig,
   TouchpadServerMessage,
+  TouchpadShortcutConfig,
   TouchpadThemeMode,
   WebOSAppConfig,
 } from './types';
@@ -29,7 +31,9 @@ type BooleanOptionField =
   | 'show_audio_controls'
   | 'show_keyboard_button'
   | 'show_fullscreen_button'
+  | 'show_shortcut_launcher'
   | 'show_app_buttons'
+  | 'hide_shortcut_launcher_after_selection'
   | 'hide_app_launcher_after_launch'
   | 'auto_focus_keyboard'
   | 'invert_scroll';
@@ -38,8 +42,15 @@ type NumberOptionField = 'sensitivity' | 'scroll_multiplier' | 'double_tap_ms' |
 type GestureModeActionField = 'swipe_left' | 'swipe_right' | 'swipe_up' | 'swipe_down' | 'tap' | 'double_tap' | 'hold';
 type HAGestureModeActionField = GestureModeActionField;
 type TouchpadAudioActionField = `${TouchpadAudioButtonField}_${TouchpadAudioActionEvent}`;
-type HAActionEditorField = HAGestureModeActionField | TouchpadAudioActionField;
+type HAActionEditorField = string;
 type GestureActionOption = { value: TouchpadGestureAction; label: string };
+type EditableShortcutConfig = {
+  type?: 'action' | 'webos_app';
+  name?: string;
+  icon?: string;
+  app_id?: string;
+  action?: TouchpadHAGestureAction;
+};
 
 const BOOLEAN_DEFAULTS: Record<BooleanOptionField, boolean> = {
   show_lock: true,
@@ -48,7 +59,9 @@ const BOOLEAN_DEFAULTS: Record<BooleanOptionField, boolean> = {
   show_audio_controls: true,
   show_keyboard_button: true,
   show_fullscreen_button: true,
+  show_shortcut_launcher: false,
   show_app_buttons: false,
+  hide_shortcut_launcher_after_selection: false,
   hide_app_launcher_after_launch: false,
   auto_focus_keyboard: true,
   invert_scroll: false,
@@ -70,7 +83,6 @@ const BOOLEAN_FIELDS: Array<{ field: BooleanOptionField; label: string }> = [
   { field: 'show_fullscreen_button', label: 'Show fullscreen button' },
   { field: 'auto_focus_keyboard', label: 'Focus keyboard input when opened' },
   { field: 'invert_scroll', label: 'Reverse scroll direction' },
-  { field: 'show_app_buttons', label: 'Show webOS app button' },
 ];
 
 const NUMBER_FIELDS: Array<{ field: NumberOptionField; label: string; step: string }> = [
@@ -351,8 +363,6 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
     const numberFields = NUMBER_FIELDS.filter(
       ({ field }) => !isHAOnly || (field !== 'sensitivity' && field !== 'scroll_multiplier')
     );
-    const showWebOSAppSection = controlsProfile === 'webos';
-
     return html`
       <details class="option-group collapsible">
         <summary>Controls</summary>
@@ -375,7 +385,7 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
       </details>
 
       ${this._renderAudioControls(source, controlsProfile, update)}
-      ${showWebOSAppSection ? this._renderWebOSApps(source, wsUrl, update) : null}
+      ${this._renderAppAndActionShortcuts(source, controlsProfile, wsUrl, update)}
       ${isHAOnly ? null : this._renderGestureMode(source, controlsProfile, (gestureMode) => update('gesture_mode', gestureMode))}
       ${this._renderHAGestureMode(source, controlsProfile, (gestureMode) => update('ha_gesture_mode', gestureMode))}
 
@@ -397,6 +407,9 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
   }
 
   private _computeHAGestureActionLabel = (schema: { name?: string }): string => {
+    if (schema.name?.startsWith('action_shortcut_')) {
+      return 'Action';
+    }
     return HA_ACTION_FIELD_LABELS.get(schema.name as HAActionEditorField) ?? '';
   };
 
@@ -600,99 +613,105 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
     return html`<div class="gesture-hint">Using Double tap delays Tap by the double tap window.</div>`;
   }
 
-  private _renderWebOSApps(
+  private _renderAppAndActionShortcuts(
     source: TouchpadOptionConfig,
+    controlsProfile: TouchpadControlsProfile,
     wsUrl: string,
     update: (field: keyof TouchpadOptionConfig, value: unknown) => void
   ): TemplateResult {
-    const apps = this._webOSAppsValue(source);
-    const showApps = this._booleanValue(source, 'show_app_buttons');
-    const hideAfterLaunch = this._booleanValue(source, 'hide_app_launcher_after_launch');
+    const isWebOS = controlsProfile === 'webos';
+    const shortcuts = this._shortcutsValue(source, isWebOS);
+    const visibleShortcuts = shortcuts
+      .map((shortcut, index) => ({ shortcut, index }))
+      .filter(({ shortcut }) => isWebOS || this._isActionShortcut(shortcut));
+    const appShortcuts = shortcuts.filter((shortcut): shortcut is TouchpadShortcutConfig & WebOSAppConfig =>
+      this._isWebOSShortcut(shortcut)
+    );
+    const showLauncher = this._shortcutLauncherValue(source);
+    const hideAfterSelection = this._hideShortcutLauncherAfterSelectionValue(source);
     const sourceKey = this._tvAppSourceKey(wsUrl);
-    const picker = this._tvAppPicker.sourceKey === sourceKey ? this._tvAppPicker : { apps: [], loading: false };
-    const existingIds = new Set(apps.map((app) => app.app_id));
+    const picker = isWebOS && this._tvAppPicker.sourceKey === sourceKey ? this._tvAppPicker : { apps: [], loading: false };
+    const existingIds = new Set(appShortcuts.map((app) => app.app_id));
     const tvApps = picker.apps.filter((app) => !existingIds.has(app.app_id));
     const pickerMessage = picker.message ?? (picker.apps.length > 0 && tvApps.length === 0 ? 'All TV apps are already in the list.' : undefined);
+    const updateShortcuts = (nextShortcuts: TouchpadShortcutConfig[]) => update('shortcuts', nextShortcuts);
     return html`
       <details class="option-group collapsible">
-        <summary>webOS app buttons</summary>
+        <summary>App and action shortcuts</summary>
         <div class="collapsible-content">
           <div class="toggles">
             <label class="toggle">
               <input
                 type="checkbox"
-                .checked=${showApps}
-                @change=${(ev: Event) => update('show_app_buttons', (ev.target as HTMLInputElement).checked)}
+                .checked=${showLauncher}
+                @change=${(ev: Event) => update('show_shortcut_launcher', (ev.target as HTMLInputElement).checked)}
               />
-              <span>Show webOS app button</span>
+              <span>Show shortcut launcher</span>
             </label>
             <label class="toggle">
               <input
                 type="checkbox"
-                .checked=${hideAfterLaunch}
-                @change=${(ev: Event) => update('hide_app_launcher_after_launch', (ev.target as HTMLInputElement).checked)}
+                .checked=${hideAfterSelection}
+                @change=${(ev: Event) =>
+                  update('hide_shortcut_launcher_after_selection', (ev.target as HTMLInputElement).checked)}
               />
-              <span>Hide app bar after app selection</span>
+              <span>Hide shortcuts after selection</span>
             </label>
           </div>
-          <div class="app-toolbar">
-            <h4>Apps</h4>
-            <div class="button-row">
-              <button
-                class="secondary"
-                type="button"
-                @click=${() => update('webos_apps', [...apps, { name: 'App', app_id: '', icon: 'mdi:apps' }])}
-              >
-                Add app
-              </button>
-              <button
-                class="secondary"
-                type="button"
-                ?disabled=${!String(wsUrl).trim() || picker.loading}
-                @click=${() => this._loadAppsFromTV(wsUrl)}
-              >
-                ${picker.loading ? 'Loading...' : 'Add from TV'}
-              </button>
-            </div>
-          </div>
+
+          ${visibleShortcuts.length > 0
+            ? html`<div class="app-list">
+                ${visibleShortcuts.map(({ shortcut, index }) =>
+                  this._renderShortcut(shortcut, index, shortcuts, updateShortcuts)
+                )}
+              </div>`
+            : html`<div class="empty-state">No shortcuts configured.</div>`}
+
           ${pickerMessage ? html`<div class="app-picker-message">${pickerMessage}</div>` : null}
           ${tvApps.length > 0
             ? html`<div class="tv-app-picker">
                 ${tvApps.map(
-                  (app) => html`<button class="tv-app-option" type="button" @click=${() => update('webos_apps', [...apps, app])}>
+                  (app) => html`<button
+                    class="tv-app-option"
+                    type="button"
+                    @click=${() => updateShortcuts([...shortcuts, this._webOSAppToShortcut(app)])}
+                  >
                     ${app.icon ? html`<ha-icon icon=${app.icon}></ha-icon>` : null}
                     <span>${app.name}</span>
                   </button>`
                 )}
               </div>`
             : null}
-          <div class="app-list">
-            ${apps.map(
-              (app, index) => html`
-                <div class="app-row">
-                  <div class="app-main-fields">
-                    ${this._renderTextField('Name', app.name ?? '', 'Netflix', (value) =>
-                      this._updateWebOSApp(apps, index, 'name', value, (nextApps) => update('webos_apps', nextApps))
-                    )}
-                    ${this._renderTextField('App ID', app.app_id ?? '', 'netflix', (value) =>
-                      this._updateWebOSApp(apps, index, 'app_id', value, (nextApps) => update('webos_apps', nextApps))
-                    )}
-                  </div>
-                  <div class="app-action-fields">
-                    ${this._renderIconField('Icon', app.icon ?? '', 'compact', (value) =>
-                      this._updateWebOSApp(apps, index, 'icon', value || undefined, (nextApps) => update('webos_apps', nextApps))
-                    )}
+          <div class="app-toolbar">
+            <h4>Add shortcuts</h4>
+            <div class="button-row">
+              ${isWebOS
+                ? html`
                     <button
-                      class="danger remove-app"
+                      class="secondary"
                       type="button"
-                      @click=${() => update('webos_apps', apps.filter((_, appIndex) => appIndex !== index))}
+                      @click=${() => updateShortcuts([...shortcuts, { type: 'webos_app', name: 'App', app_id: '', icon: 'mdi:apps' }])}
                     >
-                      Remove
+                      Add TV app
                     </button>
-                  </div>
-                </div>
-              `
-            )}
+                    <button
+                      class="secondary"
+                      type="button"
+                      ?disabled=${!String(wsUrl).trim() || picker.loading}
+                      @click=${() => this._loadAppsFromTV(wsUrl)}
+                    >
+                      ${picker.loading ? 'Loading...' : 'Add from TV'}
+                    </button>
+                  `
+                : null}
+              <button
+                class="secondary"
+                type="button"
+                @click=${() => updateShortcuts([...shortcuts, this._newActionShortcut()])}
+              >
+                Add action shortcut
+              </button>
+            </div>
           </div>
         </div>
       </details>
@@ -705,6 +724,58 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
         <span>${label}</span>
         <input type="text" .value=${value} placeholder=${placeholder} @input=${(ev: Event) => update((ev.target as HTMLInputElement).value)} />
       </label>
+    `;
+  }
+
+  private _renderShortcut(
+    shortcut: TouchpadShortcutConfig,
+    index: number,
+    shortcuts: TouchpadShortcutConfig[],
+    update: (shortcuts: TouchpadShortcutConfig[]) => void
+  ): TemplateResult {
+    if (this._isWebOSShortcut(shortcut)) {
+      return html`
+        <div class="app-row">
+          <div class="app-main-fields">
+            ${this._renderTextField('TV app name', shortcut.name ?? '', 'Netflix', (value) =>
+              this._updateShortcut(shortcuts, index, { name: value }, update)
+            )}
+            ${this._renderTextField('TV app ID', shortcut.app_id ?? '', 'netflix', (value) =>
+              this._updateShortcut(shortcuts, index, { app_id: value }, update)
+            )}
+          </div>
+          <div class="app-action-fields">
+            ${this._renderIconField('Icon', shortcut.icon ?? '', 'compact', (value) =>
+              this._updateShortcut(shortcuts, index, { icon: value || undefined }, update)
+            )}
+            <button class="danger remove-app" type="button" @click=${() => update(shortcuts.filter((_, shortcutIndex) => shortcutIndex !== index))}>
+              Remove
+            </button>
+          </div>
+        </div>
+      `;
+    }
+
+    const action = shortcut.action ?? { action: 'none' };
+    return html`
+      <div class="app-row action-shortcut-row">
+        <div class="app-main-fields">
+          ${this._renderTextField('Shortcut name', shortcut.name ?? '', 'Lights', (value) =>
+            this._updateShortcut(shortcuts, index, { name: value }, update)
+          )}
+          ${this._renderIconField('Icon', shortcut.icon ?? '', 'compact', (value) =>
+            this._updateShortcut(shortcuts, index, { icon: value || undefined }, update)
+          )}
+        </div>
+        ${this._renderHAActionField(`action_shortcut_${index}`, 'Action', action, (value) =>
+          this._updateShortcut(shortcuts, index, { action: value }, update)
+        )}
+        <div class="button-row">
+          <button class="danger remove-app" type="button" @click=${() => update(shortcuts.filter((_, shortcutIndex) => shortcutIndex !== index))}>
+            Remove
+          </button>
+        </div>
+      </div>
     `;
   }
 
@@ -934,8 +1005,42 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
     return source[field] ?? this._config?.[field] ?? BOOLEAN_DEFAULTS[field];
   }
 
-  private _webOSAppsValue(source: TouchpadOptionConfig): WebOSAppConfig[] {
-    const apps = source.webos_apps ?? this._config?.webos_apps ?? DEFAULT_WEBOS_APPS;
+  private _shortcutLauncherValue(source: TouchpadOptionConfig): boolean {
+    return (
+      source.show_shortcut_launcher ??
+      this._config?.show_shortcut_launcher ??
+      source.show_app_buttons ??
+      this._config?.show_app_buttons ??
+      BOOLEAN_DEFAULTS.show_shortcut_launcher
+    );
+  }
+
+  private _hideShortcutLauncherAfterSelectionValue(source: TouchpadOptionConfig): boolean {
+    return (
+      source.hide_shortcut_launcher_after_selection ??
+      this._config?.hide_shortcut_launcher_after_selection ??
+      source.hide_app_launcher_after_launch ??
+      this._config?.hide_app_launcher_after_launch ??
+      BOOLEAN_DEFAULTS.hide_shortcut_launcher_after_selection
+    );
+  }
+
+  private _shortcutsValue(source: TouchpadOptionConfig, includeDefaultWebOSApps: boolean): TouchpadShortcutConfig[] {
+    const shortcuts = source.shortcuts ?? this._config?.shortcuts;
+    if (Array.isArray(shortcuts)) {
+      return shortcuts
+        .map((shortcut) => this._normalizeShortcut(shortcut))
+        .filter((shortcut): shortcut is TouchpadShortcutConfig => Boolean(shortcut));
+    }
+
+    return [
+      ...this._legacyWebOSAppsValue(source, includeDefaultWebOSApps).map((app) => this._webOSAppToShortcut(app)),
+      ...this._legacyActionShortcutsValue(source),
+    ];
+  }
+
+  private _legacyWebOSAppsValue(source: TouchpadOptionConfig, includeDefaultWebOSApps = true): WebOSAppConfig[] {
+    const apps = source.webos_apps ?? this._config?.webos_apps ?? (includeDefaultWebOSApps ? DEFAULT_WEBOS_APPS : []);
     if (!Array.isArray(apps)) {
       return [];
     }
@@ -944,6 +1049,55 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
       app_id: String(app?.app_id ?? ''),
       icon: app?.icon ? String(app.icon) : undefined,
     }));
+  }
+
+  private _legacyActionShortcutsValue(source: TouchpadOptionConfig): TouchpadActionShortcutConfig[] {
+    const shortcuts = source.action_shortcuts ?? this._config?.action_shortcuts ?? [];
+    if (!Array.isArray(shortcuts)) {
+      return [];
+    }
+
+    return shortcuts.map((shortcut) => ({
+      type: 'action',
+      name: String(shortcut?.name ?? ''),
+      icon: shortcut?.icon ? String(shortcut.icon).trim() : undefined,
+      action: this._normalizeHAGestureAction(shortcut?.action),
+    }));
+  }
+
+  private _normalizeShortcut(shortcut: TouchpadShortcutConfig): TouchpadShortcutConfig | undefined {
+    if (this._isWebOSShortcut(shortcut)) {
+      return {
+        type: 'webos_app',
+        name: String(shortcut?.name ?? ''),
+        app_id: String(shortcut?.app_id ?? ''),
+        icon: shortcut?.icon ? String(shortcut.icon).trim() : undefined,
+      };
+    }
+
+    return {
+      type: 'action',
+      name: String(shortcut?.name ?? ''),
+      icon: shortcut?.icon ? String(shortcut.icon).trim() : undefined,
+      action: this._normalizeHAGestureAction((shortcut as TouchpadActionShortcutConfig)?.action),
+    };
+  }
+
+  private _webOSAppToShortcut(app: WebOSAppConfig): TouchpadShortcutConfig {
+    return {
+      type: 'webos_app',
+      name: String(app?.name ?? ''),
+      app_id: String(app?.app_id ?? ''),
+      icon: app?.icon ? String(app.icon).trim() : undefined,
+    };
+  }
+
+  private _isWebOSShortcut(shortcut: TouchpadShortcutConfig | undefined): shortcut is TouchpadShortcutConfig & WebOSAppConfig {
+    return Boolean(shortcut && (shortcut.type === 'webos_app' || 'app_id' in shortcut));
+  }
+
+  private _isActionShortcut(shortcut: TouchpadShortcutConfig): shortcut is TouchpadActionShortcutConfig {
+    return !this._isWebOSShortcut(shortcut);
   }
 
   private _defaultGestureMode(profile: TouchpadControlsProfile): Required<TouchpadGestureModeConfig> {
@@ -1062,23 +1216,46 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
     return source === this._config ? {} : this._config?.audio_controls ?? {};
   }
 
-  private _updateWebOSApp(
-    apps: WebOSAppConfig[],
+  private _newActionShortcut(): TouchpadActionShortcutConfig {
+    return {
+      type: 'action',
+      name: 'Action',
+      icon: 'mdi:lightning-bolt-outline',
+      action: { action: 'none' },
+    };
+  }
+
+  private _updateShortcut(
+    shortcuts: TouchpadShortcutConfig[],
     index: number,
-    field: keyof WebOSAppConfig,
-    value: string | undefined,
-    update: (apps: WebOSAppConfig[]) => void
+    patch: EditableShortcutConfig,
+    update: (shortcuts: TouchpadShortcutConfig[]) => void
   ): void {
-    const cleanValue = typeof value === 'string' && (field === 'app_id' || field === 'icon') ? value.trim() : value;
-    const next = apps.map((app, appIndex) => {
-      if (appIndex !== index) return app;
-      const nextApp = { ...app };
-      if (cleanValue === undefined) {
-        delete nextApp[field];
-      } else {
-        nextApp[field] = cleanValue;
+    const next = shortcuts.map((shortcut, shortcutIndex) => {
+      if (shortcutIndex !== index) return shortcut;
+      const nextShortcut: EditableShortcutConfig = { ...shortcut };
+      if ('name' in patch) {
+        nextShortcut.name = patch.name;
       }
-      return nextApp;
+      if ('app_id' in patch) {
+        nextShortcut.type = 'webos_app';
+        nextShortcut.app_id = String(patch.app_id ?? '').trim();
+        delete nextShortcut.action;
+      }
+      if ('icon' in patch) {
+        const icon = String(patch.icon ?? '').trim();
+        if (icon) {
+          nextShortcut.icon = icon;
+        } else {
+          delete nextShortcut.icon;
+        }
+      }
+      if ('action' in patch) {
+        nextShortcut.type = 'action';
+        nextShortcut.action = this._normalizeHAGestureAction(patch.action);
+        delete nextShortcut.app_id;
+      }
+      return nextShortcut as TouchpadShortcutConfig;
     });
     update(next);
   }
@@ -1325,13 +1502,18 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
       show_audio_controls: device.show_audio_controls,
       show_keyboard_button: device.show_keyboard_button,
       show_fullscreen_button: device.show_fullscreen_button,
+      show_shortcut_launcher: device.show_shortcut_launcher ?? device.show_app_buttons,
       show_app_buttons: device.show_app_buttons,
+      hide_shortcut_launcher_after_selection:
+        device.hide_shortcut_launcher_after_selection ?? device.hide_app_launcher_after_launch,
       hide_app_launcher_after_launch: device.hide_app_launcher_after_launch,
       auto_focus_keyboard: device.auto_focus_keyboard,
       audio_controls: device.audio_controls ? { ...device.audio_controls } : config.audio_controls,
       gesture_mode: device.gesture_mode ? { ...device.gesture_mode } : rootProfile === controlsProfile ? config.gesture_mode : undefined,
       ha_gesture_mode: device.ha_gesture_mode ? { ...device.ha_gesture_mode } : config.ha_gesture_mode,
+      shortcuts: device.shortcuts?.map((shortcut) => ({ ...shortcut })),
       webos_apps: device.webos_apps,
+      action_shortcuts: device.action_shortcuts?.map((shortcut) => ({ ...shortcut })),
       invert_scroll: device.invert_scroll,
       sensitivity: device.sensitivity,
       scroll_multiplier: device.scroll_multiplier,
@@ -1379,8 +1561,8 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
       show_audio_controls: BOOLEAN_DEFAULTS.show_audio_controls,
       show_keyboard_button: BOOLEAN_DEFAULTS.show_keyboard_button,
       show_fullscreen_button: BOOLEAN_DEFAULTS.show_fullscreen_button,
-      show_app_buttons: BOOLEAN_DEFAULTS.show_app_buttons,
-      hide_app_launcher_after_launch: BOOLEAN_DEFAULTS.hide_app_launcher_after_launch,
+      show_shortcut_launcher: BOOLEAN_DEFAULTS.show_shortcut_launcher,
+      hide_shortcut_launcher_after_selection: BOOLEAN_DEFAULTS.hide_shortcut_launcher_after_selection,
       auto_focus_keyboard: BOOLEAN_DEFAULTS.auto_focus_keyboard,
       invert_scroll: BOOLEAN_DEFAULTS.invert_scroll,
     };
@@ -1393,9 +1575,12 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
     target.show_audio_controls = source.show_audio_controls ?? BOOLEAN_DEFAULTS.show_audio_controls;
     target.show_keyboard_button = source.show_keyboard_button ?? BOOLEAN_DEFAULTS.show_keyboard_button;
     target.show_fullscreen_button = source.show_fullscreen_button ?? BOOLEAN_DEFAULTS.show_fullscreen_button;
-    target.show_app_buttons = source.show_app_buttons ?? BOOLEAN_DEFAULTS.show_app_buttons;
-    target.hide_app_launcher_after_launch =
-      source.hide_app_launcher_after_launch ?? BOOLEAN_DEFAULTS.hide_app_launcher_after_launch;
+    target.show_shortcut_launcher =
+      source.show_shortcut_launcher ?? source.show_app_buttons ?? BOOLEAN_DEFAULTS.show_shortcut_launcher;
+    target.hide_shortcut_launcher_after_selection =
+      source.hide_shortcut_launcher_after_selection ??
+      source.hide_app_launcher_after_launch ??
+      BOOLEAN_DEFAULTS.hide_shortcut_launcher_after_selection;
     target.auto_focus_keyboard = source.auto_focus_keyboard ?? BOOLEAN_DEFAULTS.auto_focus_keyboard;
     if (source.audio_controls) {
       target.audio_controls = { ...source.audio_controls };
@@ -1412,7 +1597,9 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
     } else {
       delete target.ha_gesture_mode;
     }
+    target.shortcuts = source.shortcuts?.map((shortcut) => ({ ...shortcut }));
     target.webos_apps = source.webos_apps?.map((app) => ({ ...app }));
+    target.action_shortcuts = source.action_shortcuts?.map((shortcut) => ({ ...shortcut }));
     target.invert_scroll = source.invert_scroll ?? BOOLEAN_DEFAULTS.invert_scroll;
     target.sensitivity = source.sensitivity;
     target.scroll_multiplier = source.scroll_multiplier;
@@ -1496,10 +1683,12 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
       next.storage_id = createStorageId();
     }
     this._migrateControlsProfile(next);
+    this._cleanShortcutAliases(next);
     if (next.devices) {
       next.devices = next.devices.map((device) => {
         const nextDevice = this._withoutUndefinedDevice(device);
         this._migrateControlsProfile(nextDevice);
+        this._cleanShortcutAliases(nextDevice);
         return nextDevice;
       });
     }
@@ -1515,6 +1704,19 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
       target.controls_profile = target.backend;
     }
     delete target.backend;
+  }
+
+  private _cleanShortcutAliases(target: TouchpadOptionConfig): void {
+    if (target.show_shortcut_launcher !== undefined) {
+      delete target.show_app_buttons;
+    }
+    if (target.hide_shortcut_launcher_after_selection !== undefined) {
+      delete target.hide_app_launcher_after_launch;
+    }
+    if (target.shortcuts !== undefined) {
+      delete target.webos_apps;
+      delete target.action_shortcuts;
+    }
   }
 
   private _withoutUndefinedConfig(source: TouchpadCardConfig): TouchpadCardConfig {
@@ -1787,6 +1989,15 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
       gap: 12px;
     }
 
+    .empty-state {
+      padding: 8px 10px;
+      border-radius: 6px;
+      background: rgba(127, 127, 127, 0.08);
+      color: var(--secondary-text-color);
+      font-size: 13px;
+      line-height: 1.35;
+    }
+
     .app-picker-message {
       padding: 8px 10px;
       border-radius: 6px;
@@ -1835,6 +2046,10 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
       border: 1px solid var(--divider-color, rgba(127, 127, 127, 0.28));
       border-radius: 8px;
       background: rgba(127, 127, 127, 0.04);
+    }
+
+    .action-shortcut-row .button-row {
+      justify-content: flex-start;
     }
 
     .app-main-fields,

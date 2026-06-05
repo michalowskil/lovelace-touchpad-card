@@ -4,6 +4,7 @@ import { HomeAssistant, LovelaceCardEditor } from 'custom-card-helpers';
 import {
   KeyCommand,
   ResolvedTouchpadAudioControlsConfig,
+  TouchpadActionShortcutConfig,
   TouchpadAudioButtonField,
   TouchpadAudioControlsConfig,
   TouchpadAudioControlsMode,
@@ -16,6 +17,7 @@ import {
   TouchpadGestureModeConfig,
   TouchpadMessage,
   TouchpadServerMessage,
+  TouchpadShortcutConfig,
   TouchpadThemeMode,
   VolumeAction,
   WebOSAppConfig,
@@ -91,7 +93,7 @@ interface TouchpadRuntimeOptions {
   audioControls: ResolvedTouchpadAudioControlsConfig;
   gestureMode: Required<TouchpadGestureModeConfig>;
   haGestureMode: Required<TouchpadHAGestureModeConfig>;
-  webosApps: WebOSAppConfig[];
+  shortcuts: TouchpadShortcutConfig[];
 }
 
 interface PersistedDeviceUiState {
@@ -156,7 +158,9 @@ const DEFAULTS = {
   showAudioControls: true,
   showKeyboardButton: true,
   showFullscreenButton: true,
+  showShortcutLauncher: false,
   showAppButtons: false,
+  hideShortcutLauncherAfterSelection: false,
   hideAppLauncherAfterLaunch: false,
   autoFocusKeyboard: true,
 };
@@ -293,13 +297,13 @@ export class TouchpadCard extends LitElement {
     showAudioControls: DEFAULTS.showAudioControls,
     showKeyboardButton: DEFAULTS.showKeyboardButton,
     showFullscreenButton: DEFAULTS.showFullscreenButton,
-    showAppButtons: DEFAULTS.showAppButtons,
-    hideAppLauncherAfterLaunch: DEFAULTS.hideAppLauncherAfterLaunch,
+    showAppButtons: DEFAULTS.showShortcutLauncher,
+    hideAppLauncherAfterLaunch: DEFAULTS.hideShortcutLauncherAfterSelection,
     autoFocusKeyboard: DEFAULTS.autoFocusKeyboard,
     audioControls: defaultAudioControls(),
     gestureMode: defaultGestureMode(DEFAULTS.controlsProfile),
     haGestureMode: defaultHAGestureMode(),
-    webosApps: DEFAULT_WEBOS_APPS,
+    shortcuts: DEFAULT_WEBOS_APPS.map((app) => ({ type: 'webos_app', ...app })),
   };
 
   public static async getConfigElement(): Promise<LovelaceCardEditor> {
@@ -319,8 +323,8 @@ export class TouchpadCard extends LitElement {
       show_audio_controls: DEFAULTS.showAudioControls,
       show_keyboard_button: DEFAULTS.showKeyboardButton,
       show_fullscreen_button: DEFAULTS.showFullscreenButton,
-      show_app_buttons: DEFAULTS.showAppButtons,
-      hide_app_launcher_after_launch: DEFAULTS.hideAppLauncherAfterLaunch,
+      show_shortcut_launcher: DEFAULTS.showShortcutLauncher,
+      hide_shortcut_launcher_after_selection: DEFAULTS.hideShortcutLauncherAfterSelection,
       auto_focus_keyboard: DEFAULTS.autoFocusKeyboard,
     };
   }
@@ -525,8 +529,79 @@ export class TouchpadCard extends LitElement {
     };
   }
 
+  private normalizeActionShortcuts(shortcuts: TouchpadActionShortcutConfig[] | undefined): TouchpadActionShortcutConfig[] {
+    if (!Array.isArray(shortcuts)) {
+      return [];
+    }
+
+    return shortcuts.map((shortcut) => ({
+      type: 'action',
+      name: String(shortcut?.name ?? ''),
+      icon: String(shortcut?.icon ?? '').trim() || undefined,
+      action: this.normalizeHAGestureAction(shortcut?.action),
+    }));
+  }
+
+  private normalizeShortcuts(
+    shortcuts: TouchpadShortcutConfig[] | undefined,
+    webosApps: WebOSAppConfig[] | undefined,
+    actionShortcuts: TouchpadActionShortcutConfig[] | undefined,
+    controlsProfile: TouchpadControlsProfile
+  ): TouchpadShortcutConfig[] {
+    if (Array.isArray(shortcuts)) {
+      return shortcuts
+        .map((shortcut) => this.normalizeShortcut(shortcut))
+        .filter((shortcut): shortcut is TouchpadShortcutConfig => Boolean(shortcut));
+    }
+
+    const legacyWebOSApps = webosApps ?? (controlsProfile === 'webos' ? DEFAULT_WEBOS_APPS : []);
+    return [
+      ...normalizeWebOSApps(legacyWebOSApps).map((app) => ({ type: 'webos_app' as const, ...app })),
+      ...this.normalizeActionShortcuts(actionShortcuts),
+    ];
+  }
+
+  private normalizeShortcut(shortcut: TouchpadShortcutConfig): TouchpadShortcutConfig | undefined {
+    if (this.isWebOSShortcutConfig(shortcut)) {
+      const app = normalizeWebOSApps([shortcut])[0];
+      return app ? { type: 'webos_app', ...app } : undefined;
+    }
+
+    return {
+      type: 'action',
+      name: String(shortcut?.name ?? ''),
+      icon: String(shortcut?.icon ?? '').trim() || undefined,
+      action: this.normalizeHAGestureAction((shortcut as TouchpadActionShortcutConfig)?.action),
+    };
+  }
+
+  private isWebOSShortcutConfig(shortcut: TouchpadShortcutConfig | undefined): shortcut is TouchpadShortcutConfig & WebOSAppConfig {
+    return Boolean(shortcut && (shortcut.type === 'webos_app' || 'app_id' in shortcut));
+  }
+
+  private isWebOSShortcut(shortcut: TouchpadShortcutConfig): shortcut is TouchpadShortcutConfig & WebOSAppConfig {
+    return this.isWebOSShortcutConfig(shortcut);
+  }
+
+  private isActionShortcut(shortcut: TouchpadShortcutConfig): shortcut is TouchpadActionShortcutConfig {
+    return !this.isWebOSShortcut(shortcut);
+  }
+
+  private visibleShortcuts(): TouchpadShortcutConfig[] {
+    return this.opts.shortcuts.filter((shortcut) => this.opts.controlsProfile === 'webos' || this.isActionShortcut(shortcut));
+  }
+
+  private webOSLauncherApps(): Array<TouchpadShortcutConfig & WebOSAppConfig> {
+    if (this.opts.controlsProfile !== 'webos') {
+      return [];
+    }
+    return this.opts.shortcuts.filter((shortcut): shortcut is TouchpadShortcutConfig & WebOSAppConfig => this.isWebOSShortcut(shortcut));
+  }
+
   private resolveOptions(config: TouchpadCardConfig, device?: TouchpadDeviceConfig): TouchpadRuntimeOptions {
+    const shortcuts = device?.shortcuts ?? config.shortcuts;
     const webosApps = device?.webos_apps ?? config.webos_apps;
+    const actionShortcuts = device?.action_shortcuts ?? config.action_shortcuts;
     const controlsProfile = this.normalizeControlsProfile(
       this.configuredControlsProfile(device ?? config) ?? this.configuredControlsProfile(config)
     );
@@ -548,16 +623,23 @@ export class TouchpadCard extends LitElement {
       showAudioControls: device?.show_audio_controls ?? config.show_audio_controls ?? DEFAULTS.showAudioControls,
       showKeyboardButton: controlsProfile === 'home_assistant' ? false : device?.show_keyboard_button ?? config.show_keyboard_button ?? DEFAULTS.showKeyboardButton,
       showFullscreenButton: device?.show_fullscreen_button ?? config.show_fullscreen_button ?? DEFAULTS.showFullscreenButton,
-      showAppButtons: controlsProfile === 'home_assistant' ? false : device?.show_app_buttons ?? config.show_app_buttons ?? DEFAULTS.showAppButtons,
+      showAppButtons:
+        device?.show_shortcut_launcher ??
+        config.show_shortcut_launcher ??
+        device?.show_app_buttons ??
+        config.show_app_buttons ??
+        DEFAULTS.showShortcutLauncher,
       hideAppLauncherAfterLaunch:
+        device?.hide_shortcut_launcher_after_selection ??
+        config.hide_shortcut_launcher_after_selection ??
         device?.hide_app_launcher_after_launch ??
         config.hide_app_launcher_after_launch ??
-        DEFAULTS.hideAppLauncherAfterLaunch,
+        DEFAULTS.hideShortcutLauncherAfterSelection,
       autoFocusKeyboard: device?.auto_focus_keyboard ?? config.auto_focus_keyboard ?? DEFAULTS.autoFocusKeyboard,
       audioControls,
       gestureMode: this.resolveGestureMode(config, device, controlsProfile),
       haGestureMode: this.resolveHAGestureMode(config, device),
-      webosApps: normalizeWebOSApps(webosApps ?? DEFAULT_WEBOS_APPS),
+      shortcuts: this.normalizeShortcuts(shortcuts, webosApps, actionShortcuts, controlsProfile),
     };
   }
 
@@ -616,13 +698,17 @@ export class TouchpadCard extends LitElement {
         show_audio_controls: config.show_audio_controls,
         show_keyboard_button: config.show_keyboard_button,
         show_fullscreen_button: config.show_fullscreen_button,
+        show_shortcut_launcher: config.show_shortcut_launcher,
         show_app_buttons: config.show_app_buttons,
+        hide_shortcut_launcher_after_selection: config.hide_shortcut_launcher_after_selection,
         hide_app_launcher_after_launch: config.hide_app_launcher_after_launch,
         auto_focus_keyboard: config.auto_focus_keyboard,
         audio_controls: config.audio_controls,
         gesture_mode: config.gesture_mode,
         ha_gesture_mode: config.ha_gesture_mode,
+        shortcuts: config.shortcuts,
         webos_apps: config.webos_apps,
+        action_shortcuts: config.action_shortcuts,
       },
     ];
   }
@@ -801,7 +887,7 @@ export class TouchpadCard extends LitElement {
   }
 
   private appNameForId(appId: string): string | undefined {
-    const app = this.opts.webosApps.find((candidate) => candidate.app_id === appId);
+    const app = this.webOSLauncherApps().find((candidate) => candidate.app_id === appId);
     return app ? this.appDisplayLabel(app) : undefined;
   }
 
@@ -1782,14 +1868,37 @@ export class TouchpadCard extends LitElement {
     }
   }
 
+  private executeActionShortcut(shortcut: TouchpadActionShortcutConfig): void {
+    const action = shortcut.action ?? { action: 'none' };
+    if (!this.hasHAGestureAction(action)) {
+      return;
+    }
+    if (!this.hass) {
+      logCardWarn('Cannot execute shortcut action because hass is not available.');
+      return;
+    }
+
+    void this.executeHAAction(action).catch((err) => {
+      logCardError('Failed to execute shortcut action.', err);
+    });
+    if (this.opts.hideAppLauncherAfterLaunch && this._appLauncherOpen) {
+      this._appLauncherOpen = false;
+      this.persistUiState();
+    }
+  }
+
   private appDisplayLabel(app: WebOSAppConfig): string {
     return String(app.name ?? '').trim() || String(app.app_id ?? '').trim() || 'App';
+  }
+
+  private actionShortcutLabel(shortcut: TouchpadActionShortcutConfig): string {
+    return String(shortcut.name ?? '').trim() || 'Action shortcut';
   }
 
   private queryAppAvailability(): void {
     if (!this.socket || this.socket.readyState !== WebSocket.OPEN) return;
     if (this.opts.controlsProfile !== 'webos' || !this.opts.showAppButtons) return;
-    const appIds = this.opts.webosApps.map((app) => app.app_id).filter(Boolean);
+    const appIds = this.webOSLauncherApps().map((app) => app.app_id).filter(Boolean);
     if (!appIds.length) return;
     const msg: TouchpadMessage = { t: 'query_apps', app_ids: appIds };
     try {
@@ -2209,7 +2318,7 @@ export class TouchpadCard extends LitElement {
   }
 
   private canShowAppLauncherToggle(): boolean {
-    return this.opts.controlsProfile === 'webos' && this.opts.showAppButtons && this.opts.webosApps.length > 0;
+    return this.opts.showAppButtons && this.visibleShortcuts().length > 0;
   }
 
   protected render() {
@@ -2221,6 +2330,7 @@ export class TouchpadCard extends LitElement {
     const isHAOnly = this.opts.controlsProfile === 'home_assistant';
     const showAppLauncherToggle = this.canShowAppLauncherToggle();
     const showAppLauncher = showAppLauncherToggle && this._appLauncherOpen;
+    const launcherShortcuts = this.visibleShortcuts();
     const themeClass = `theme-${this.effectiveThemeMode()}`;
     const cardClass = `${themeClass} ${this._fullscreenActive ? 'fullscreen' : ''}`;
     const keyboardPlaceholder = isWebos ? 'Tap to type on TV' : 'Tap to type on PC';
@@ -2350,7 +2460,7 @@ export class TouchpadCard extends LitElement {
             ? html`<button
                 class="app-toggle ${this._appLauncherOpen ? 'active' : ''} ${this.opts.showKeyboardButton ? 'with-keyboard-toggle' : ''}"
                 type="button"
-                title="Apps"
+                title="Shortcuts"
                 @click=${this.toggleAppLauncher}
               >
                 <ha-icon icon="mdi:apps"></ha-icon>
@@ -2415,25 +2525,39 @@ export class TouchpadCard extends LitElement {
         </div>
         ${showAppLauncher
           ? html`<div class="app-strip ${showKeyboardSection ? 'with-keyboard' : ''}">
-              ${this.opts.webosApps.map(
-                (app) => {
-                  const unavailable = this.isAppUnavailable(app.app_id);
-                  const name = String(app.name ?? '').trim();
-                  const icon = String(app.icon ?? '').trim();
-                  const label = this.appDisplayLabel(app);
+              ${launcherShortcuts.map((shortcut) => {
+                if (this.isWebOSShortcut(shortcut)) {
+                  const unavailable = this.isAppUnavailable(shortcut.app_id);
+                  const name = String(shortcut.name ?? '').trim();
+                  const icon = String(shortcut.icon ?? '').trim();
+                  const label = this.appDisplayLabel(shortcut);
                   const iconOnly = Boolean(icon && !name);
                   return html`<button
                     class="app-btn ${iconOnly ? 'icon-only' : ''} ${unavailable ? 'unavailable' : ''}"
                     title=${unavailable ? `${label} not available on this TV` : label}
                     aria-label=${label}
                     aria-disabled=${unavailable ? 'true' : 'false'}
-                    @click=${() => this.launchApp(app)}
+                    @click=${() => this.launchApp(shortcut)}
                   >
                     ${icon ? html`<ha-icon icon=${icon}></ha-icon>` : nothing}
                     ${name ? html`<span>${name}</span>` : nothing}
                   </button>`;
                 }
-              )}
+
+                const name = String(shortcut.name ?? '').trim();
+                const icon = String(shortcut.icon ?? '').trim();
+                const label = this.actionShortcutLabel(shortcut);
+                const iconOnly = Boolean(icon && !name);
+                return html`<button
+                  class="app-btn ${iconOnly ? 'icon-only' : ''}"
+                  title=${label}
+                  aria-label=${label}
+                  @click=${() => this.executeActionShortcut(shortcut)}
+                >
+                  ${icon ? html`<ha-icon icon=${icon}></ha-icon>` : nothing}
+                  ${name || !icon ? html`<span>${label}</span>` : nothing}
+                </button>`;
+              })}
               ${this._appNotice ? html`<div class="app-notice">${this._appNotice}</div>` : nothing}
             </div>`
           : nothing}

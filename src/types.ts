@@ -9,6 +9,22 @@ export interface WebOSAppConfig {
   icon?: string;
 }
 
+export interface TouchpadActionShortcutConfig {
+  type?: 'action';
+  name?: string;
+  icon?: string;
+  action?: TouchpadHAGestureAction;
+}
+
+export interface TouchpadWebOSAppShortcutConfig {
+  type: 'webos_app';
+  name?: string;
+  app_id: string;
+  icon?: string;
+}
+
+export type TouchpadShortcutConfig = TouchpadActionShortcutConfig | TouchpadWebOSAppShortcutConfig;
+
 export type TouchpadGestureAction =
   | 'none'
   | 'enter'
@@ -88,10 +104,18 @@ export interface TouchpadOptionConfig {
   show_audio_controls?: boolean;
   show_keyboard_button?: boolean;
   show_fullscreen_button?: boolean;
+  show_shortcut_launcher?: boolean;
+  /** @deprecated Use show_shortcut_launcher. Kept as a backwards-compatible alias. */
   show_app_buttons?: boolean;
+  hide_shortcut_launcher_after_selection?: boolean;
+  /** @deprecated Use hide_shortcut_launcher_after_selection. Kept as a backwards-compatible alias. */
   hide_app_launcher_after_launch?: boolean;
   auto_focus_keyboard?: boolean;
+  shortcuts?: TouchpadShortcutConfig[];
+  /** @deprecated Use shortcuts. Kept as a backwards-compatible alias. */
   webos_apps?: WebOSAppConfig[];
+  /** @deprecated Use shortcuts. Kept as a backwards-compatible alias. */
+  action_shortcuts?: TouchpadActionShortcutConfig[];
   audio_controls?: TouchpadAudioControlsConfig;
   gesture_mode?: TouchpadGestureModeConfig;
   ha_gesture_mode?: TouchpadHAGestureModeConfig;
