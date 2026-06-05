@@ -133,6 +133,27 @@ ha_gesture_mode:
       command: left
 ```
 
+Example for an Android TV Remote / Google TV remote entity:
+
+```yaml
+controls_profile: home_assistant
+ha_gesture_mode:
+  tap:
+    action: perform-action
+    perform_action: remote.send_command
+    target:
+      entity_id: remote.living_room_tv
+    data:
+      command: DPAD_CENTER
+  swipe_left:
+    action: perform-action
+    perform_action: remote.send_command
+    target:
+      entity_id: remote.living_room_tv
+    data:
+      command: DPAD_LEFT
+```
+
 ## Audio controls
 
 Enable **Show audio icons** in the **Audio controls** editor section to show Volume up, Volume down, and Mute buttons on the touchpad. With **Audio button actions** set to **Device volume controls**, the buttons send volume commands to the selected MS Windows or LG webOS backend.
