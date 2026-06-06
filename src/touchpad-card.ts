@@ -27,7 +27,12 @@ import './touchpad-card-editor';
 
 type PointerGesture = 'move' | 'scroll' | 'gesture' | null;
 type GestureDirection = 'swipe_left' | 'swipe_right' | 'swipe_up' | 'swipe_down';
-type GestureEventName = GestureDirection | 'tap' | 'double_tap' | 'hold';
+type TwoFingerGestureDirection =
+  | 'two_finger_swipe_left'
+  | 'two_finger_swipe_right'
+  | 'two_finger_swipe_up'
+  | 'two_finger_swipe_down';
+type GestureEventName = GestureDirection | TwoFingerGestureDirection | 'tap' | 'double_tap' | 'hold' | 'two_finger_tap';
 
 interface PointerState {
   id: number;
@@ -200,6 +205,11 @@ function defaultGestureMode(profile: TouchpadControlsProfile): Required<Touchpad
     tap: 'enter',
     double_tap: 'none',
     hold: profile === 'webos' ? 'back' : 'escape',
+    two_finger_tap: 'none',
+    two_finger_swipe_left: 'none',
+    two_finger_swipe_right: 'none',
+    two_finger_swipe_up: 'none',
+    two_finger_swipe_down: 'none',
   };
 }
 
@@ -214,6 +224,11 @@ function defaultHAGestureMode(): Required<TouchpadHAGestureModeConfig> {
     tap: { action: 'none' },
     double_tap: { action: 'none' },
     hold: { action: 'none' },
+    two_finger_tap: { action: 'none' },
+    two_finger_swipe_left: { action: 'none' },
+    two_finger_swipe_right: { action: 'none' },
+    two_finger_swipe_up: { action: 'none' },
+    two_finger_swipe_down: { action: 'none' },
   };
 }
 
@@ -280,6 +295,7 @@ export class TouchpadCard extends LitElement {
   };
   private suppressAudioClick = false;
   private gestureHoldFired = false;
+  private gestureMaxPointerCount = 0;
   private dragPointerId?: number;
   private lockedPan?: LockedPanState;
 
@@ -481,6 +497,23 @@ export class TouchpadCard extends LitElement {
       tap: this.normalizeGestureAction(local.tap ?? root.tap, defaults.tap),
       double_tap: this.normalizeGestureAction(local.double_tap ?? root.double_tap, defaults.double_tap),
       hold: this.normalizeGestureAction(local.hold ?? root.hold, defaults.hold),
+      two_finger_tap: this.normalizeGestureAction(local.two_finger_tap ?? root.two_finger_tap, defaults.two_finger_tap),
+      two_finger_swipe_left: this.normalizeGestureAction(
+        local.two_finger_swipe_left ?? root.two_finger_swipe_left,
+        defaults.two_finger_swipe_left
+      ),
+      two_finger_swipe_right: this.normalizeGestureAction(
+        local.two_finger_swipe_right ?? root.two_finger_swipe_right,
+        defaults.two_finger_swipe_right
+      ),
+      two_finger_swipe_up: this.normalizeGestureAction(
+        local.two_finger_swipe_up ?? root.two_finger_swipe_up,
+        defaults.two_finger_swipe_up
+      ),
+      two_finger_swipe_down: this.normalizeGestureAction(
+        local.two_finger_swipe_down ?? root.two_finger_swipe_down,
+        defaults.two_finger_swipe_down
+      ),
     };
   }
 
@@ -499,6 +532,11 @@ export class TouchpadCard extends LitElement {
       tap: this.normalizeHAGestureAction(local.tap ?? root.tap),
       double_tap: this.normalizeHAGestureAction(local.double_tap ?? root.double_tap),
       hold: this.normalizeHAGestureAction(local.hold ?? root.hold),
+      two_finger_tap: this.normalizeHAGestureAction(local.two_finger_tap ?? root.two_finger_tap),
+      two_finger_swipe_left: this.normalizeHAGestureAction(local.two_finger_swipe_left ?? root.two_finger_swipe_left),
+      two_finger_swipe_right: this.normalizeHAGestureAction(local.two_finger_swipe_right ?? root.two_finger_swipe_right),
+      two_finger_swipe_up: this.normalizeHAGestureAction(local.two_finger_swipe_up ?? root.two_finger_swipe_up),
+      two_finger_swipe_down: this.normalizeHAGestureAction(local.two_finger_swipe_down ?? root.two_finger_swipe_down),
     };
   }
 
@@ -1321,6 +1359,7 @@ export class TouchpadCard extends LitElement {
     this.cancelGestureTapTimer(false);
 
     const now = performance.now();
+    const wasEmpty = this.pointers.size === 0;
     this.pointers.set(ev.pointerId, {
       id: ev.pointerId,
       x: ev.clientX,
@@ -1331,6 +1370,7 @@ export class TouchpadCard extends LitElement {
     });
 
     this.gesture = 'gesture';
+    this.gestureMaxPointerCount = wasEmpty ? 1 : Math.max(this.gestureMaxPointerCount, this.pointers.size);
     if (this.pointers.size === 1) {
       this.gestureHoldFired = false;
       this.startGestureModeHoldTimer(ev);
@@ -1360,24 +1400,52 @@ export class TouchpadCard extends LitElement {
 
     ev.preventDefault();
     const beforeCount = this.pointers.size;
-    const dist = Math.hypot(ev.clientX - pointer.startX, ev.clientY - pointer.startY);
+    const endedPointer = { ...pointer, x: ev.clientX, y: ev.clientY };
+    const dist = this.pointerDistanceFromStart(endedPointer);
+    const now = performance.now();
 
     this.pointers.delete(ev.pointerId);
     this.cancelHoldTimer();
 
+    if (beforeCount === 2 && this.gesture === 'gesture' && this.gestureMaxPointerCount === 2 && !this.gestureHoldFired) {
+      const remaining = [...this.pointers.values()][0];
+      this.clearGestureTapTimer();
+      if (remaining) {
+        const eventName = this.twoFingerGestureEvent(endedPointer, remaining, now);
+        if (eventName) {
+          this.executeGesture(eventName);
+        }
+      }
+      this.pointers.clear();
+      this.gesture = null;
+      this.gestureHoldFired = false;
+      this.gestureMaxPointerCount = 0;
+      return;
+    }
+
+    if (beforeCount > 1 || this.gestureMaxPointerCount > 1) {
+      this.clearGestureTapTimer();
+      this.pointers.clear();
+      this.gesture = null;
+      this.gestureHoldFired = false;
+      this.gestureMaxPointerCount = 0;
+      return;
+    }
+
     if (beforeCount === 1 && this.gesture === 'gesture' && !this.gestureHoldFired) {
-      const direction = this.gestureSwipeDirection(pointer, ev.clientX, ev.clientY);
+      const direction = this.gestureSwipeDirection(endedPointer);
       if (direction) {
         this.clearGestureTapTimer();
         this.executeGesture(direction);
       } else if (dist <= this.opts.tapSuppressionPx) {
-        this.handleGestureModeTap(performance.now());
+        this.handleGestureModeTap(now);
       }
     }
 
     if (this.pointers.size === 0) {
       this.gesture = null;
       this.gestureHoldFired = false;
+      this.gestureMaxPointerCount = 0;
     }
   }
 
@@ -1390,6 +1458,7 @@ export class TouchpadCard extends LitElement {
       this.clearGestureTapTimer();
       this.gesture = null;
       this.gestureHoldFired = false;
+      this.gestureMaxPointerCount = 0;
     }
   }
 
@@ -1409,21 +1478,62 @@ export class TouchpadCard extends LitElement {
     }, HOLD_DELAY_MS);
   }
 
-  private gestureSwipeDirection(pointer: PointerState, endX: number, endY: number): GestureDirection | null {
-    const dx = endX - pointer.startX;
-    const dy = endY - pointer.startY;
+  private pointerDistanceFromStart(pointer: PointerState): number {
+    return Math.hypot(pointer.x - pointer.startX, pointer.y - pointer.startY);
+  }
+
+  private rawGestureSwipeDirection(pointer: PointerState): GestureDirection | null {
+    const dx = pointer.x - pointer.startX;
+    const dy = pointer.y - pointer.startY;
     const minSwipeDistance = Math.max(GESTURE_SWIPE_MIN_PX, this.opts.tapSuppressionPx * 3);
     if (Math.hypot(dx, dy) < minSwipeDistance) {
       return null;
     }
 
-    const direction: GestureDirection =
-      Math.abs(dx) >= Math.abs(dy) ? (dx < 0 ? 'swipe_left' : 'swipe_right') : dy < 0 ? 'swipe_up' : 'swipe_down';
-    const invertSwipes =
-      this.opts.controlsProfile === 'home_assistant' || this._haGestureModeActive
-        ? this.opts.haGestureMode.invert_swipes
-        : this.opts.gestureMode.invert_swipes;
-    return invertSwipes ? this.invertedGestureDirection(direction) : direction;
+    return Math.abs(dx) >= Math.abs(dy) ? (dx < 0 ? 'swipe_left' : 'swipe_right') : dy < 0 ? 'swipe_up' : 'swipe_down';
+  }
+
+  private gestureSwipeDirection(pointer: PointerState): GestureDirection | null {
+    const direction = this.rawGestureSwipeDirection(pointer);
+    if (!direction) return null;
+    return this.activeInvertSwipes() ? this.invertedGestureDirection(direction) : direction;
+  }
+
+  private twoFingerGestureEvent(first: PointerState, second: PointerState, now: number): GestureEventName | null {
+    const firstDistance = this.pointerDistanceFromStart(first);
+    const secondDistance = this.pointerDistanceFromStart(second);
+    const elapsed = now - Math.min(first.startTime, second.startTime);
+    if (firstDistance <= this.opts.tapSuppressionPx && secondDistance <= this.opts.tapSuppressionPx && elapsed <= this.opts.doubleTapMs) {
+      return 'two_finger_tap';
+    }
+
+    const firstDirection = this.rawGestureSwipeDirection(first);
+    const secondDirection = this.rawGestureSwipeDirection(second);
+    if (!firstDirection || firstDirection !== secondDirection) {
+      return null;
+    }
+
+    const direction = this.activeInvertSwipes() ? this.invertedGestureDirection(firstDirection) : firstDirection;
+    return this.twoFingerGestureDirection(direction);
+  }
+
+  private activeInvertSwipes(): boolean {
+    return this.opts.controlsProfile === 'home_assistant' || this._haGestureModeActive
+      ? this.opts.haGestureMode.invert_swipes
+      : this.opts.gestureMode.invert_swipes;
+  }
+
+  private twoFingerGestureDirection(direction: GestureDirection): TwoFingerGestureDirection {
+    switch (direction) {
+      case 'swipe_left':
+        return 'two_finger_swipe_left';
+      case 'swipe_right':
+        return 'two_finger_swipe_right';
+      case 'swipe_up':
+        return 'two_finger_swipe_up';
+      case 'swipe_down':
+        return 'two_finger_swipe_down';
+    }
   }
 
   private invertedGestureDirection(direction: GestureDirection): GestureDirection {
@@ -2289,6 +2399,7 @@ export class TouchpadCard extends LitElement {
     this.pointers.clear();
     this.gesture = null;
     this.gestureHoldFired = false;
+    this.gestureMaxPointerCount = 0;
     this.lastTapTime = 0;
     this.gestureLastTapTime = 0;
     this.lockedPan = undefined;

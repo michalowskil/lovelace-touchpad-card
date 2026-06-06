@@ -58,6 +58,11 @@ export interface TouchpadGestureModeConfig {
   tap?: TouchpadGestureAction;
   double_tap?: TouchpadGestureAction;
   hold?: TouchpadGestureAction;
+  two_finger_tap?: TouchpadGestureAction;
+  two_finger_swipe_left?: TouchpadGestureAction;
+  two_finger_swipe_right?: TouchpadGestureAction;
+  two_finger_swipe_up?: TouchpadGestureAction;
+  two_finger_swipe_down?: TouchpadGestureAction;
 }
 
 export type TouchpadHAGestureAction = Record<string, unknown>;
@@ -88,6 +93,11 @@ export interface TouchpadHAGestureModeConfig {
   tap?: TouchpadHAGestureAction;
   double_tap?: TouchpadHAGestureAction;
   hold?: TouchpadHAGestureAction;
+  two_finger_tap?: TouchpadHAGestureAction;
+  two_finger_swipe_left?: TouchpadHAGestureAction;
+  two_finger_swipe_right?: TouchpadHAGestureAction;
+  two_finger_swipe_up?: TouchpadHAGestureAction;
+  two_finger_swipe_down?: TouchpadHAGestureAction;
 }
 
 export interface TouchpadEndpointConfig {

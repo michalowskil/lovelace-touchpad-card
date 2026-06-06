@@ -39,7 +39,19 @@ type BooleanOptionField =
   | 'invert_scroll';
 
 type NumberOptionField = 'sensitivity' | 'scroll_multiplier' | 'double_tap_ms' | 'tap_suppression_px';
-type GestureModeActionField = 'swipe_left' | 'swipe_right' | 'swipe_up' | 'swipe_down' | 'tap' | 'double_tap' | 'hold';
+type GestureModeActionField =
+  | 'swipe_left'
+  | 'swipe_right'
+  | 'swipe_up'
+  | 'swipe_down'
+  | 'tap'
+  | 'double_tap'
+  | 'hold'
+  | 'two_finger_tap'
+  | 'two_finger_swipe_left'
+  | 'two_finger_swipe_right'
+  | 'two_finger_swipe_up'
+  | 'two_finger_swipe_down';
 type HAGestureModeActionField = GestureModeActionField;
 type TouchpadAudioActionField = `${TouchpadAudioButtonField}_${TouchpadAudioActionEvent}`;
 type HAActionEditorField = string;
@@ -141,6 +153,11 @@ const GESTURE_MODE_FIELDS: Array<{ field: GestureModeActionField; label: string 
   { field: 'tap', label: 'Tap' },
   { field: 'double_tap', label: 'Double tap' },
   { field: 'hold', label: 'Hold' },
+  { field: 'two_finger_tap', label: 'Two-finger tap' },
+  { field: 'two_finger_swipe_left', label: 'Two-finger swipe left' },
+  { field: 'two_finger_swipe_right', label: 'Two-finger swipe right' },
+  { field: 'two_finger_swipe_up', label: 'Two-finger swipe up' },
+  { field: 'two_finger_swipe_down', label: 'Two-finger swipe down' },
 ];
 
 const AUDIO_BUTTON_FIELDS: Array<{ field: TouchpadAudioButtonField; label: string }> = [
@@ -231,6 +248,17 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
       <div class="editor">
         ${this._renderCardConfig(config)}
         ${devices.length > 1 ? this._renderMultiDeviceConfig(devices) : this._renderSingleDeviceConfig(singleConfig)}
+        ${this._renderEditorFooter()}
+      </div>
+    `;
+  }
+
+  private _renderEditorFooter(): TemplateResult {
+    return html`
+      <div class="editor-footer">
+        LTC v0.15.0
+        <span aria-hidden="true">&bull;</span>
+        <a target="_blank" rel="noopener" href="https://michalowskil.github.io/lovelace-touchpad-card/">Documentation</a>
       </div>
     `;
   }
@@ -610,7 +638,7 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
   }
 
   private _renderDoubleTapDelayHint(): TemplateResult {
-    return html`<div class="gesture-hint">Using Double tap delays Tap by the double tap window.</div>`;
+    return html`<div class="gesture-hint">Using "Double tap" delays "Tap" by the double tap window.</div>`;
   }
 
   private _renderAppAndActionShortcuts(
@@ -1111,6 +1139,11 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
       tap: 'enter',
       double_tap: 'none',
       hold: profile === 'webos' ? 'back' : 'escape',
+      two_finger_tap: 'none',
+      two_finger_swipe_left: 'none',
+      two_finger_swipe_right: 'none',
+      two_finger_swipe_up: 'none',
+      two_finger_swipe_down: 'none',
     };
   }
 
@@ -1129,6 +1162,23 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
       tap: this._asGestureAction(local.tap ?? root.tap, defaults.tap),
       double_tap: this._asGestureAction(local.double_tap ?? root.double_tap, defaults.double_tap),
       hold: this._asGestureAction(local.hold ?? root.hold, defaults.hold),
+      two_finger_tap: this._asGestureAction(local.two_finger_tap ?? root.two_finger_tap, defaults.two_finger_tap),
+      two_finger_swipe_left: this._asGestureAction(
+        local.two_finger_swipe_left ?? root.two_finger_swipe_left,
+        defaults.two_finger_swipe_left
+      ),
+      two_finger_swipe_right: this._asGestureAction(
+        local.two_finger_swipe_right ?? root.two_finger_swipe_right,
+        defaults.two_finger_swipe_right
+      ),
+      two_finger_swipe_up: this._asGestureAction(
+        local.two_finger_swipe_up ?? root.two_finger_swipe_up,
+        defaults.two_finger_swipe_up
+      ),
+      two_finger_swipe_down: this._asGestureAction(
+        local.two_finger_swipe_down ?? root.two_finger_swipe_down,
+        defaults.two_finger_swipe_down
+      ),
     };
   }
 
@@ -1143,6 +1193,11 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
       tap: { action: 'none' },
       double_tap: { action: 'none' },
       hold: { action: 'none' },
+      two_finger_tap: { action: 'none' },
+      two_finger_swipe_left: { action: 'none' },
+      two_finger_swipe_right: { action: 'none' },
+      two_finger_swipe_up: { action: 'none' },
+      two_finger_swipe_down: { action: 'none' },
     };
   }
 
@@ -1161,6 +1216,11 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
       tap: this._asHAGestureAction(local.tap ?? root.tap),
       double_tap: this._asHAGestureAction(local.double_tap ?? root.double_tap),
       hold: this._asHAGestureAction(local.hold ?? root.hold),
+      two_finger_tap: this._asHAGestureAction(local.two_finger_tap ?? root.two_finger_tap),
+      two_finger_swipe_left: this._asHAGestureAction(local.two_finger_swipe_left ?? root.two_finger_swipe_left),
+      two_finger_swipe_right: this._asHAGestureAction(local.two_finger_swipe_right ?? root.two_finger_swipe_right),
+      two_finger_swipe_up: this._asHAGestureAction(local.two_finger_swipe_up ?? root.two_finger_swipe_up),
+      two_finger_swipe_down: this._asHAGestureAction(local.two_finger_swipe_down ?? root.two_finger_swipe_down),
     };
   }
 
@@ -1396,7 +1456,12 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
       this._asGestureAction(gestureMode.swipe_down, defaults.swipe_down) === defaults.swipe_down &&
       this._asGestureAction(gestureMode.tap, defaults.tap) === defaults.tap &&
       this._asGestureAction(gestureMode.double_tap, defaults.double_tap) === defaults.double_tap &&
-      this._asGestureAction(gestureMode.hold, defaults.hold) === defaults.hold
+      this._asGestureAction(gestureMode.hold, defaults.hold) === defaults.hold &&
+      this._asGestureAction(gestureMode.two_finger_tap, defaults.two_finger_tap) === defaults.two_finger_tap &&
+      this._asGestureAction(gestureMode.two_finger_swipe_left, defaults.two_finger_swipe_left) === defaults.two_finger_swipe_left &&
+      this._asGestureAction(gestureMode.two_finger_swipe_right, defaults.two_finger_swipe_right) === defaults.two_finger_swipe_right &&
+      this._asGestureAction(gestureMode.two_finger_swipe_up, defaults.two_finger_swipe_up) === defaults.two_finger_swipe_up &&
+      this._asGestureAction(gestureMode.two_finger_swipe_down, defaults.two_finger_swipe_down) === defaults.two_finger_swipe_down
     );
   }
 
@@ -1748,6 +1813,22 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
       color: var(--primary-text-color);
     }
 
+    .editor-footer {
+      margin-bottom: 10px;
+      color: var(--secondary-text-color);
+      font-size: 10px;
+      line-height: 1.4;
+    }
+
+    .editor-footer a {
+      color: var(--primary-color);
+      text-decoration: none;
+    }
+
+    .editor-footer a:hover {
+      text-decoration: underline;
+    }
+
     .config-section,
     .device-config {
       display: flex;
@@ -1802,8 +1883,9 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
     }
 
     .gesture-hint {
-      color: var(--secondary-text-color);
+      color: var(--error-color, #d32f2f);
       font-size: 12px;
+      font-weight: 600;
       line-height: 1.35;
     }
 

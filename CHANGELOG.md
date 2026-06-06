@@ -1,5 +1,8 @@
 # Card Changelog
 
+## 0.15.0
+- Added configurable two-finger tap and two-finger swipe gestures to Gesture mode and Home Assistant gesture mode.
+
 ## 0.14.0
 - Renamed the webOS app buttons editor section to App and action shortcuts.
 - Added configurable Home Assistant action shortcuts with custom names and icons.

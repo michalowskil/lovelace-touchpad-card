@@ -86,12 +86,13 @@ Default mappings are:
 - Tap: Enter / OK.
 - Double tap: disabled.
 - Hold: Back on LG webOS, Escape on MS Windows.
+- Two-finger tap and two-finger swipe left/right/up/down: disabled.
 
-Each gesture can be changed in the editor. Available actions include arrows, Enter/OK, Escape, Home/End, Page Up/Page Down, and volume actions. LG webOS also exposes Back, Power, and Settings. Use **Reverse swipe directions** if your TV/app navigation feels inverted. Configuring **Double tap** delays **Tap** by the double tap window so the card can tell whether a second tap follows.
+Each gesture can be changed in the editor. Available actions include arrows, Enter/OK, Escape, Home/End, Page Up/Page Down, and volume actions. LG webOS also exposes Back, Power, and Settings. Use **Reverse swipe directions** if your TV/app navigation feels inverted; this also applies to two-finger swipes. Configuring **Double tap** delays **Tap** by the double tap window so the card can tell whether a second tap follows.
 
 ## Home Assistant gesture mode
 
-Enable **Show Home Assistant gesture mode button** in the **Home Assistant gesture controls** editor section to add a second gesture toggle. This mode uses the same swipe/tap/double-tap/hold detection, but executes the configured Home Assistant/Lovelace action instead of sending keys to the PC/TV backend.
+Enable **Show Home Assistant gesture mode button** in the **Home Assistant gesture controls** editor section to add a second gesture toggle. This mode uses the same swipe/tap/double-tap/hold/two-finger detection, but executes the configured Home Assistant/Lovelace action instead of sending keys to the PC/TV backend.
 
 Set **Controls profile** to **Home Assistant only** when the card should not connect to a Windows or LG webOS backend. In that profile `wsUrl` is not required, the touchpad surface directly runs the configured Home Assistant gestures, device-only tuning is hidden, status text is hidden, and **LOCK** remains available so mobile users can scroll the Home Assistant dashboard instead of triggering gestures.
 
@@ -287,7 +288,7 @@ Example with the **NGINX Home Assistant SSL proxy** add-on:
 For remote access, you only need to expose your HTTPS port (usually `443`) to the internet. Do not expose backend ports (for example `8765` or `8778`) directly unless you understand the risk: these WebSocket backends do not add their own login screen.
 
 ## Changelog
-- **Card (frontend):** latest v0.14.0 — see [CHANGELOG.md](CHANGELOG.md). Highlights: Added configurable Home Assistant action shortcuts with custom names and icons.
+- **Card (frontend):** latest v0.15.0 — see [CHANGELOG.md](CHANGELOG.md). Highlights: Added configurable two-finger tap and two-finger swipe gestures.
 - **Windows backend:** latest v0.5.1 — see [backend/CHANGELOG.md](backend/CHANGELOG.md). Highlights: tray update checks now track the Windows backend version, so card-only releases do not notify Windows users.
 - **webOS add-on:** latest v0.4.0 — see [addon/webos-pointer-bridge/CHANGELOG.md](addon/webos-pointer-bridge/CHANGELOG.md). Highlights: app launch support plus installed-app reporting for the card editor picker.
 
