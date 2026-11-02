@@ -22,6 +22,7 @@ import json
 import logging
 import math
 import ssl
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -42,6 +43,11 @@ APP_LIST_URIS = (
 MAX_POINTER_DELTA = 40
 MAX_POINTER_CHUNKS = 64
 SCROLL_SCALE = 0.005
+# Some webOS firmware answers registerRemoteKeyboard only after the luna-service
+# timeout (about 5 minutes) and then returns no socket. Never block input on it.
+IME_RESPONSE_TIMEOUT = 3
+TV_RETRY_SECONDS = 5
+TV_DOWN_LOG_INTERVAL = 15
 
 
 class WebOSPointerBridge:
@@ -54,6 +60,7 @@ class WebOSPointerBridge:
         listen_port: int,
         client_key_file: Path,
         origin: Optional[str],
+        name: Optional[str] = None,
     ) -> None:
         self.tv_host = tv_host
         self.tv_port = tv_port
@@ -62,6 +69,7 @@ class WebOSPointerBridge:
         self.listen_port = listen_port
         self.client_key_file = client_key_file
         self.origin = origin
+        self.name = name or tv_host
 
         self.client_key: Optional[str] = None
         self.session_ws: Optional[ClientConnection] = None
@@ -72,14 +80,63 @@ class WebOSPointerBridge:
         self._session_request_lock = asyncio.Lock()
         self._scroll_rem_x = 0.0
         self._scroll_rem_y = 0.0
+        self._last_down_log = 0.0
 
     async def start(self) -> None:
         self._load_client_key()
-        await self.ensure_pointer()
         server = await websockets.serve(self._handle_client, self.listen_host, self.listen_port)
-        logging.info("Listening for touchpad clients on ws://%s:%s", self.listen_host, self.listen_port)
-        async with server:
-            await asyncio.Future()  # run forever
+        logging.info(
+            "Listening for touchpad clients on ws://%s:%s (%s)",
+            self.listen_host,
+            self.listen_port,
+            self.name,
+        )
+        try:
+            await self._maintain_tv_connection()
+        finally:
+            server.close()
+            await server.wait_closed()
+            async with self._connect_lock:
+                await self._teardown_pointer()
+
+    async def _maintain_tv_connection(self) -> None:
+        """Keep the TV socket up without taking the local listen port down."""
+        while True:
+            try:
+                await self.ensure_pointer()
+                await self._wait_until_tv_drops()
+                if self._pointer_is_up():
+                    continue
+                logging.warning("webOS connection to %s closed; reconnecting", self.tv_host)
+                await asyncio.sleep(1)
+            except asyncio.CancelledError:
+                raise
+            except Exception as err:
+                logging.warning(
+                    "Could not connect to webOS at %s (%s: %s); retrying in %ss",
+                    self.tv_host,
+                    type(err).__name__,
+                    err,
+                    TV_RETRY_SECONDS,
+                )
+                await asyncio.sleep(TV_RETRY_SECONDS)
+
+    async def _wait_until_tv_drops(self) -> None:
+        pointer = self.pointer_ws
+        session = self.session_ws
+        waiters = []
+        if pointer is not None:
+            waiters.append(asyncio.create_task(pointer.wait_closed()))
+        if session is not None:
+            waiters.append(asyncio.create_task(session.wait_closed()))
+        if not waiters:
+            return
+        try:
+            await asyncio.wait(waiters, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            for waiter in waiters:
+                waiter.cancel()
+            await asyncio.gather(*waiters, return_exceptions=True)
 
     async def _handle_client(self, ws: ServerConnection) -> None:
         logging.info("Client connected: %s", ws.remote_address)
@@ -167,15 +224,28 @@ class WebOSPointerBridge:
         except ConnectionClosed:
             pass
 
+    def _pointer_is_up(self) -> bool:
+        return self.pointer_ws is not None and not self._is_closed(self.pointer_ws)
+
+    def _log_tv_down(self) -> None:
+        now = time.monotonic()
+        if now - self._last_down_log < TV_DOWN_LOG_INTERVAL:
+            return
+        self._last_down_log = now
+        logging.warning("TV %s is not connected; pointer commands are waiting for it", self.name)
+
     async def _send_pointer(self, payload: str) -> None:
-        await self.ensure_pointer()
-        if not self.pointer_ws:
-            raise ConnectionError("Pointer socket not available")
+        ws = self.pointer_ws
+        if ws is None or self._is_closed(ws):
+            self._log_tv_down()
+            return
         try:
-            await self.pointer_ws.send(payload)
+            await ws.send(payload)
         except Exception:
             logging.exception("Failed to send pointer payload")
-            await self._teardown_pointer()
+            async with self._connect_lock:
+                if self.pointer_ws is ws:
+                    await self._teardown_pointer()
 
     def _chunk_pointer_delta(self, dx: float, dy: float) -> list[tuple[int, int]]:
         target_dx = int(round(dx))
@@ -225,7 +295,9 @@ class WebOSPointerBridge:
         await self._send_pointer("type:click\n\n")
 
     async def _send_text(self, text: str) -> None:
-        await self.ensure_pointer()
+        if not self._pointer_is_up():
+            self._log_tv_down()
+            return
         if await self._send_text_ime(text):
             return
         if await self._send_text_request(text):
@@ -446,12 +518,15 @@ class WebOSPointerBridge:
 
     async def ensure_pointer(self) -> None:
         async with self._connect_lock:
-            if self.pointer_ws and not self._is_closed(self.pointer_ws):
+            if self._pointer_is_up():
                 return
             await self._teardown_pointer()
             self._ime_failed = False
-            await self._connect_pointer()
-            await self._connect_ime()
+            try:
+                await self._connect_pointer()
+            except Exception:
+                await self._teardown_pointer()
+                raise
 
     async def ensure_ime(self) -> None:
         async with self._connect_lock:
@@ -493,34 +568,44 @@ class WebOSPointerBridge:
 
         ptr_ssl = ssl._create_unverified_context() if socket_path.startswith("wss://") else None
         origin_header = self._origin_header()
+        # The pointer resource socket often ignores WebSocket pings; a missed pong
+        # closes an otherwise usable cursor. Detect a dead TV on the next send.
+        connect_kwargs = {"ssl": ptr_ssl, "ping_interval": None}
         if origin_header:
-            self.pointer_ws = await websockets.connect(socket_path, ssl=ptr_ssl, origin=origin_header)
-        else:
-            self.pointer_ws = await websockets.connect(socket_path, ssl=ptr_ssl)
+            connect_kwargs["origin"] = origin_header
+        self.pointer_ws = await websockets.connect(socket_path, **connect_kwargs)
         logging.info("Pointer socket established: %s", socket_path)
 
     async def _connect_ime(self) -> None:
-        if not self.session_ws:
+        if not self.session_ws or self._ime_failed:
             return
         msg = {"id": "ime_0", "type": "request", "uri": IME_URI}
         try:
-            await self.session_ws.send(json.dumps(msg))
-            resp_raw = await self.session_ws.recv()
+            async with self._session_request_lock:
+                if not self.session_ws:
+                    return
+                await self.session_ws.send(json.dumps(msg))
+                resp_raw = await asyncio.wait_for(self.session_ws.recv(), timeout=IME_RESPONSE_TIMEOUT)
             resp = json.loads(resp_raw)
             socket_path = resp.get("payload", {}).get("socketPath")
             if not socket_path:
-                logging.info("IME socket not provided by TV.")
+                logging.info("IME socket not provided by TV; text will use the pointer socket.")
+                self._ime_failed = True
                 return
             ssl_ctx = ssl._create_unverified_context() if socket_path.startswith("wss://") else None
             origin_header = self._origin_header()
+            connect_kwargs = {"ssl": ssl_ctx, "ping_interval": None}
             if origin_header:
-                self.ime_ws = await websockets.connect(socket_path, ssl=ssl_ctx, origin=origin_header)
-            else:
-                self.ime_ws = await websockets.connect(socket_path, ssl=ssl_ctx)
+                connect_kwargs["origin"] = origin_header
+            self.ime_ws = await websockets.connect(socket_path, **connect_kwargs)
             logging.info("IME socket established: %s", socket_path)
+        except TimeoutError:
+            logging.info("IME registration timed out; text will use the pointer socket.")
+            self._ime_failed = True
+            self.ime_ws = None
         except Exception:
             if not self._ime_failed:
-                logging.info("IME socket not available; text will use pointer socket.")
+                logging.info("IME socket not available; text will use the pointer socket.")
             self._ime_failed = True
             self.ime_ws = None
 

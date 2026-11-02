@@ -71,6 +71,7 @@ async def run_bridge(tv_cfg: Dict[str, Any]) -> None:
         listen_port=tv_cfg["listen_port"],
         client_key_file=key_path,
         origin=tv_cfg["origin"] or None,
+        name=name,
     )
 
     while True:

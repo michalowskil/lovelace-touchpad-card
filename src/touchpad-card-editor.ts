@@ -256,7 +256,7 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
   private _renderEditorFooter(): TemplateResult {
     return html`
       <div class="editor-footer">
-        LTC v0.15.0
+        LTC v0.16.0
         <span aria-hidden="true">&bull;</span>
         <a target="_blank" rel="noopener" href="https://michalowskil.github.io/lovelace-touchpad-card/">Documentation</a>
       </div>
@@ -269,6 +269,14 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
         <div class="fields">
           ${this._renderThemeModeField(this._themeModeValue(config), (value) => this._updateRootField('theme_mode', value))}
         </div>
+        <label class="toggle">
+          <input
+            type="checkbox"
+            .checked=${config.show_device_bar_single === true}
+            @change=${(ev: Event) => this._updateRootField('show_device_bar_single', (ev.target as HTMLInputElement).checked)}
+          />
+          <span>Show the device bar when only one device is configured.</span>
+        </label>
       </section>
     `;
   }
@@ -893,7 +901,13 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
     });
 
     socket.addEventListener('error', () => {
-      finish({ apps: [], loading: false, sourceKey, message: 'Could not read apps from TV. Add apps manually.' });
+      finish({
+        apps: [],
+        loading: false,
+        sourceKey,
+        message:
+          'Could not read apps from TV. Add apps manually, or open Home Assistant at a local address such as http://192.168.0.123:8123 instead of an external domain like https://my-domain.com.',
+      });
     });
   }
 

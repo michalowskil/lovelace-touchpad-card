@@ -1,5 +1,11 @@
 # Card Changelog
 
+## 0.16.0
+- Clicking the selected device in the device bar collapses the card to that bar. While it is collapsed, no device stays highlighted. Clicking a device expands the card and selects it.
+- Added an option to show the device bar when only one device is configured. With several devices the bar stays visible. Turning the option off shows the full card again.
+- Cards on the same dashboard remember their own collapsed state.
+- The device bar can be dragged horizontally with the mouse when it overflows. Touch scrolling and Shift+wheel keep working, and a click without a drag still selects the device.
+
 ## 0.15.0
 - Added configurable two-finger tap and two-finger swipe gestures to Gesture mode and Home Assistant gesture mode.
 

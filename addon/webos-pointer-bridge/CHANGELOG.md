@@ -1,5 +1,10 @@
 # webOS Pointer Bridge Changelog
 
+## 0.4.1
+- Open the touchpad port before the TV handshake, so the card can connect while webOS is still waking up.
+- Do not wait for the optional IME socket before pointer and button input. Some LG TVs answer that request only after about 5 minutes.
+- Reconnect a dropped TV socket in the background instead of stalling every cursor and button event on that wait.
+
 ## 0.4.0
 - Added support for launching webOS apps from touchpad-card app buttons.
 - Report installed webOS app IDs and failed app launches back to the card.

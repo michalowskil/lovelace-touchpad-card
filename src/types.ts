@@ -146,6 +146,8 @@ export interface TouchpadCardConfig extends LovelaceCardConfig, TouchpadEndpoint
   type: string;
   storage_id?: string;
   theme_mode?: TouchpadThemeMode;
+  /** Show the device bar when the card has only one device. Several devices always show the bar. */
+  show_device_bar_single?: boolean;
   devices?: TouchpadDeviceConfig[];
 }
 

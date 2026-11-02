@@ -114,6 +114,7 @@ interface PersistedUiState extends PersistedDeviceUiState {
   activeDeviceId?: string;
   deviceIds?: string[];
   deviceStates?: Record<string, PersistedDeviceUiState>;
+  deviceBarCollapsed?: boolean;
 }
 
 const HOLD_DELAY_MS = 320;
@@ -251,6 +252,7 @@ export class TouchpadCard extends LitElement {
   @state() private _config?: TouchpadCardConfig;
   @state() private _devices: ResolvedTouchpadDevice[] = [];
   @state() private _activeDeviceId?: string;
+  @state() private _deviceBarCollapsed = false;
   @state() private _statusDisplay: 'disconnected' | 'connecting' | 'connected' | 'error' = 'disconnected';
   @state() private _locked = false;
   @state() private _speedMultiplier: 1 | 2 | 3 | 4 = 1;
@@ -263,6 +265,8 @@ export class TouchpadCard extends LitElement {
   @state() private _unavailableAppIds = new Set<string>();
   @state() private _appNotice?: string;
 
+  private deviceTabsDrag?: { pointerId: number; startX: number; startScroll: number; moved: boolean };
+  private deviceTabsSuppressClick = false;
   private socket?: WebSocket;
   private reconnectTimer?: number;
   private rafHandle?: number;
@@ -372,6 +376,14 @@ export class TouchpadCard extends LitElement {
     if (this.detachTimer) {
       clearTimeout(this.detachTimer);
       this.detachTimer = undefined;
+    }
+    if (this._config) {
+      const previousDeviceId = this._activeDeviceId;
+      this.restoreUiState();
+      if (previousDeviceId !== this._activeDeviceId) {
+        this.connect();
+        return;
+      }
     }
     if (this._config && (!this.socket || this.socket.readyState === WebSocket.CLOSED)) {
       this.connect();
@@ -993,7 +1005,7 @@ export class TouchpadCard extends LitElement {
     return ws ? `touchpad-card:${ws}:${this.viewStorageId()}:${this.appStorageId()}` : null;
   }
 
-  private persistenceKey(): string | null {
+  private unsuffixedPersistenceKey(): string | null {
     const baseKey = this.persistenceKeyBase();
     const storageId = this.configStorageId();
 
@@ -1006,6 +1018,67 @@ export class TouchpadCard extends LitElement {
     }
 
     return null;
+  }
+
+  private lovelaceViewRoot(): ParentNode | null {
+    let node: Node | null = this;
+    while (node) {
+      if (node instanceof Element && (node.localName === 'hui-view' || node.localName === 'hui-panel-view')) {
+        return node;
+      }
+      const root = node.getRootNode();
+      if (root instanceof ShadowRoot) {
+        node = root.host;
+      } else if (node instanceof Element) {
+        node = node.parentElement;
+      } else {
+        node = null;
+      }
+    }
+    return null;
+  }
+
+  private touchpadCardsInSameView(): TouchpadCard[] {
+    const scope = this.lovelaceViewRoot() ?? document;
+    const found: TouchpadCard[] = [];
+    const visit = (node: ParentNode) => {
+      node.querySelectorAll('touchpad-card').forEach((element) => {
+        if (element instanceof TouchpadCard && !found.includes(element)) {
+          found.push(element);
+        }
+      });
+      node.querySelectorAll('*').forEach((element) => {
+        if (element.shadowRoot) {
+          visit(element.shadowRoot);
+        }
+      });
+    };
+    visit(scope);
+    if (!found.includes(this)) {
+      found.push(this);
+    }
+    return found;
+  }
+
+  private persistenceInstanceIndex(): number {
+    const ownKey = this.unsuffixedPersistenceKey();
+    if (!ownKey || !this.isConnected) {
+      return 0;
+    }
+    const same = this.touchpadCardsInSameView().filter(
+      (card) => card.isConnected && card._config && card.unsuffixedPersistenceKey() === ownKey
+    );
+    const index = same.indexOf(this);
+    return index > 0 ? index : 0;
+  }
+
+  private persistenceKey(): string | null {
+    const key = this.unsuffixedPersistenceKey();
+    if (!key) {
+      return null;
+    }
+    const index = this.persistenceInstanceIndex();
+    return index > 0 ? `${key}:${index}` : key;
   }
 
   private previousPersistenceKeys(): string[] {
@@ -1108,11 +1181,15 @@ export class TouchpadCard extends LitElement {
   }
 
   private restoreUiState(): void {
+    if (!this.isConnected) {
+      return;
+    }
     const parsed = this.loadPersistedUiState();
     try {
       if (typeof parsed?.activeDeviceId === 'string' && this._devices.some((device) => device.id === parsed.activeDeviceId)) {
         this._activeDeviceId = parsed.activeDeviceId;
       }
+      this._deviceBarCollapsed = parsed?.deviceBarCollapsed === true;
       this.restoreDeviceUiState(parsed);
     } catch (err) {
       logCardWarn('Failed to restore touchpad UI state.', err);
@@ -1151,6 +1228,7 @@ export class TouchpadCard extends LitElement {
           activeDeviceId: this._activeDeviceId,
           deviceIds: this._devices.map((device) => device.id),
           deviceStates,
+          deviceBarCollapsed: this._deviceBarCollapsed,
         })
       );
     } catch (err) {
@@ -2363,11 +2441,87 @@ export class TouchpadCard extends LitElement {
     this.persistUiState();
   }
 
+  private onDeviceTabsPointerDown = (event: PointerEvent): void => {
+    if (event.pointerType !== 'mouse' || event.button !== 0) return;
+    const scroller = event.currentTarget;
+    if (!(scroller instanceof HTMLElement) || scroller.scrollWidth <= scroller.clientWidth) return;
+    this.deviceTabsDrag = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startScroll: scroller.scrollLeft,
+      moved: false,
+    };
+  };
+
+  private onDeviceTabsPointerMove = (event: PointerEvent): void => {
+    const drag = this.deviceTabsDrag;
+    if (!drag || event.pointerId !== drag.pointerId) return;
+    const scroller = event.currentTarget;
+    if (!(scroller instanceof HTMLElement)) return;
+    const delta = event.clientX - drag.startX;
+    if (!drag.moved && Math.abs(delta) <= 4) return;
+    if (!drag.moved) {
+      drag.moved = true;
+      scroller.style.userSelect = 'none';
+      try {
+        scroller.setPointerCapture(event.pointerId);
+      } catch {
+        // A pointer that has already ended cannot be captured. The bar still follows it.
+      }
+    }
+    scroller.scrollLeft = drag.startScroll - delta;
+    event.preventDefault();
+  };
+
+  private onDeviceTabsPointerEnd = (event: PointerEvent): void => {
+    const drag = this.deviceTabsDrag;
+    if (!drag || event.pointerId !== drag.pointerId) return;
+    const scroller = event.currentTarget;
+    this.deviceTabsDrag = undefined;
+    if (scroller instanceof HTMLElement) {
+      scroller.style.userSelect = '';
+      if (scroller.hasPointerCapture(event.pointerId)) scroller.releasePointerCapture(event.pointerId);
+    }
+    if (!drag.moved) return;
+    this.deviceTabsSuppressClick = true;
+    window.setTimeout(() => {
+      this.deviceTabsSuppressClick = false;
+    }, 0);
+  };
+
+  private onDeviceTabsClick = (event: Event): void => {
+    if (!this.deviceTabsSuppressClick) return;
+    event.preventDefault();
+    event.stopPropagation();
+    this.deviceTabsSuppressClick = false;
+  };
+
+  private onDeviceTabClick(event: Event, id: string): void {
+    if (this.deviceTabsSuppressClick) {
+      event.preventDefault();
+      event.stopPropagation();
+      this.deviceTabsSuppressClick = false;
+      return;
+    }
+    event.stopPropagation();
+    this.selectDevice(id);
+  }
+
   private selectDevice(id: string): void {
-    if (id === this._activeDeviceId || !this._devices.some((device) => device.id === id)) {
+    if (!this._devices.some((device) => device.id === id)) {
       return;
     }
 
+    if (id === this._activeDeviceId) {
+      this._deviceBarCollapsed = !this._deviceBarCollapsed;
+      if (this._deviceBarCollapsed && this._fullscreenActive) {
+        void this.exitFullscreen();
+      }
+      this.persistUiState();
+      return;
+    }
+
+    this._deviceBarCollapsed = false;
     this.persistUiState();
     this.resetInteractionState();
     this.resetAppAvailability();
@@ -2407,6 +2561,10 @@ export class TouchpadCard extends LitElement {
     this.scrollAccum = { x: 0, y: 0 };
   }
 
+  private deviceBarVisible(): boolean {
+    return this._devices.length > 1 || this._config?.show_device_bar_single === true;
+  }
+
   private deviceStatusLabel(): string {
     if (this._devices.length > 1) {
       return this.activeDevice?.name ?? 'Device';
@@ -2418,7 +2576,7 @@ export class TouchpadCard extends LitElement {
     const deviceLabel = this.deviceStatusLabel();
     switch (this._statusDisplay) {
       case 'connected':
-        return `${deviceLabel} Connected`;
+        return this.opts.controlsProfile === 'webos' ? 'Bridge connected' : `${deviceLabel} connected`;
       case 'connecting':
         return `${deviceLabel} Connecting...`;
       case 'error':
@@ -2436,14 +2594,15 @@ export class TouchpadCard extends LitElement {
     if (!this._config) return nothing;
 
     const showKeyboardSection = this.opts.showKeyboardButton && this._keyboardOpen;
-    const showDeviceTabs = this._devices.length > 1;
+    const showDeviceTabs = this.deviceBarVisible();
+    const deviceBarCollapsed = showDeviceTabs && this._deviceBarCollapsed;
     const isWebos = this.opts.controlsProfile === 'webos';
     const isHAOnly = this.opts.controlsProfile === 'home_assistant';
     const showAppLauncherToggle = this.canShowAppLauncherToggle();
     const showAppLauncher = showAppLauncherToggle && this._appLauncherOpen;
     const launcherShortcuts = this.visibleShortcuts();
     const themeClass = `theme-${this.effectiveThemeMode()}`;
-    const cardClass = `${themeClass} ${this._fullscreenActive ? 'fullscreen' : ''}`;
+    const cardClass = `${themeClass} ${this._fullscreenActive ? 'fullscreen' : ''} ${deviceBarCollapsed ? 'device-bar-collapsed' : ''}`;
     const keyboardPlaceholder = isWebos ? 'Tap to type on TV' : 'Tap to type on PC';
     const leftButtons = isWebos
       ? [
@@ -2472,24 +2631,33 @@ export class TouchpadCard extends LitElement {
     return html`
       <ha-card class=${cardClass} @contextmenu=${(e: Event) => e.preventDefault()}>
         ${showDeviceTabs
-          ? html`<div class="device-tabs" role="tablist">
-              ${this._devices.map(
-                (device) => html`<button
-                  class="device-tab ${device.id === this._activeDeviceId ? 'active' : ''}"
+          ? html`<div
+              class="device-tabs"
+              role="tablist"
+              @pointerdown=${this.onDeviceTabsPointerDown}
+              @pointermove=${this.onDeviceTabsPointerMove}
+              @pointerup=${this.onDeviceTabsPointerEnd}
+              @pointercancel=${this.onDeviceTabsPointerEnd}
+              @click=${this.onDeviceTabsClick}
+            >
+              ${this._devices.map((device) => {
+                const tabActive = !deviceBarCollapsed && device.id === this._activeDeviceId;
+                return html`<button
+                  class="device-tab ${tabActive ? 'active' : ''}"
                   type="button"
                   role="tab"
-                  aria-selected=${device.id === this._activeDeviceId ? 'true' : 'false'}
-                  @click=${(e: Event) => {
-                    e.stopPropagation();
-                    this.selectDevice(device.id);
-                  }}
+                  aria-selected=${tabActive ? 'true' : 'false'}
+                  aria-expanded=${tabActive ? 'true' : 'false'}
+                  @click=${(e: Event) => this.onDeviceTabClick(e, device.id)}
                 >
                   ${device.name}
-                </button>`
-              )}
+                </button>`;
+              })}
             </div>`
           : nothing}
-        <div
+        ${deviceBarCollapsed
+          ? nothing
+          : html`<div
           class="surface ${this._locked ? 'locked' : ''} ${showKeyboardSection ? 'with-keyboard' : ''} ${showDeviceTabs
             ? 'with-device-tabs'
             : ''} ${showKeyboardSection || showAppLauncher ? 'with-bottom-panel' : ''}"
@@ -2633,8 +2801,8 @@ export class TouchpadCard extends LitElement {
                   : ''}
               </div>`
             : nothing}
-        </div>
-        ${showAppLauncher
+        </div>`}
+        ${!deviceBarCollapsed && showAppLauncher
           ? html`<div class="app-strip ${showKeyboardSection ? 'with-keyboard' : ''}">
               ${launcherShortcuts.map((shortcut) => {
                 if (this.isWebOSShortcut(shortcut)) {
@@ -2672,7 +2840,7 @@ export class TouchpadCard extends LitElement {
               ${this._appNotice ? html`<div class="app-notice">${this._appNotice}</div>` : nothing}
             </div>`
           : nothing}
-        ${showKeyboardSection
+        ${!deviceBarCollapsed && showKeyboardSection
           ? html`<div class="controls">
                   <div class="left-panel">
                     <input
@@ -2802,9 +2970,14 @@ export class TouchpadCard extends LitElement {
       align-items: center;
       padding: 10px 12px;
       overflow-x: auto;
+      overscroll-behavior-x: contain;
       background: var(--tp-panel-bg);
       border-bottom: 1px solid var(--tp-divider);
       scrollbar-width: none;
+    }
+
+    ha-card.device-bar-collapsed .device-tabs {
+      border-bottom: none;
     }
 
     .device-tabs::-webkit-scrollbar {
