@@ -287,8 +287,20 @@ Example with the **NGINX Home Assistant SSL proxy** add-on:
 
 For remote access, you only need to expose your HTTPS port (usually `443`) to the internet. Do not expose backend ports (for example `8765` or `8778`) directly unless you understand the risk: these WebSocket backends do not add their own login screen.
 
+## Dim the screen
+
+While this card is fullscreen, it can dim the phone screen after a period of inactivity. Touching the screen restores the previous brightness. Leaving fullscreen restores it as well. The option is off by default, experimental, and tested on the Home Assistant Companion app for Android only.
+
+1. In the Companion app, open **Settings → Companion App → Manage sensors** and enable **Screen brightness**.
+2. In the card options, enable **Dim the screen after inactivity while this card is fullscreen**. Set the idle time in seconds. An empty time uses 30 seconds.
+3. Open the card in fullscreen and leave the screen untouched until that time passes.
+
+The first time, Companion asks for permission to change system settings. It opens Android's **Modify system settings** page, not a dialog on the card. Allow the permission for Home Assistant, return to the card, enter fullscreen again, and wait for the idle time.
+
+The card dims the phone that reports the screen brightness sensor, then restores that brightness. If more than one phone has this sensor enabled, the card does not guess and shows a message instead.
+
 ## Changelog
-- **Card (frontend):** latest v0.16.0 — see [CHANGELOG.md](CHANGELOG.md). Highlights: clicking the selected device collapses the card to the device bar, with an option to show that bar for a single device. An overflowing device bar can be dragged with the mouse.
+- **Card (frontend):** latest v0.17.0 — see [CHANGELOG.md](CHANGELOG.md). Highlights: fullscreen can keep the Android screen awake, and can dim it after a chosen idle time. Both are experimental.
 - **Windows backend:** latest v0.5.1 — see [backend/CHANGELOG.md](backend/CHANGELOG.md). Highlights: tray update checks now track the Windows backend version, so card-only releases do not notify Windows users.
 - **webOS add-on:** latest v0.4.1 — see [addon/webos-pointer-bridge/CHANGELOG.md](addon/webos-pointer-bridge/CHANGELOG.md). Highlights: the touchpad port opens before the TV handshake, and pointer input no longer waits on the IME socket.
 

@@ -1,5 +1,9 @@
 # Card Changelog
 
+## 0.17.0
+- Added an option to keep the screen awake while this card is fullscreen. It is off by default, experimental, and plays a small background video. Tested on the Android Home Assistant Companion app only.
+- Added an option to dim the Android screen after a chosen period of inactivity while this card is fullscreen. Touching the screen restores the previous brightness. It is off by default and experimental. An empty time uses 30 seconds.
+
 ## 0.16.0
 - Clicking the selected device in the device bar collapses the card to that bar. While it is collapsed, no device stays highlighted. Clicking a device expands the card and selects it.
 - Added an option to show the device bar when only one device is configured. With several devices the bar stays visible. Turning the option off shows the full card again.

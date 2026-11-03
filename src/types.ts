@@ -148,6 +148,12 @@ export interface TouchpadCardConfig extends LovelaceCardConfig, TouchpadEndpoint
   theme_mode?: TouchpadThemeMode;
   /** Show the device bar when the card has only one device. Several devices always show the bar. */
   show_device_bar_single?: boolean;
+  /** While this card is fullscreen, tell the Companion app to keep the screen on. */
+  keep_screen_on?: boolean;
+  /** Dim the Android screen after inactivity while this card is fullscreen. Experimental. */
+  dim_screen?: boolean;
+  /** Seconds of inactivity before dimming. Blank uses 30. */
+  dim_screen_seconds?: number;
   devices?: TouchpadDeviceConfig[];
 }
 

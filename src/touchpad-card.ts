@@ -1,4 +1,4 @@
-import { css, html, LitElement, nothing } from 'lit';
+import { css, html, LitElement, nothing, type PropertyValues } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { HomeAssistant, LovelaceCardEditor } from 'custom-card-helpers';
 import {
@@ -150,6 +150,10 @@ function logCardWarn(message: string, detail?: unknown): void {
   console.warn(label, LOG_TAG_STYLE, LOG_TEXT_STYLE);
 }
 
+const SCREEN_DIM_LEVEL = 1;
+const SCREEN_DIM_DEFAULT_SECONDS = 30;
+const SCREEN_DIM_MAX_SECONDS = 86400;
+
 const DEFAULTS = {
   themeMode: 'auto' as TouchpadThemeMode,
   controlsProfile: 'pc' as TouchpadControlsProfile,
@@ -281,6 +285,20 @@ export class TouchpadCard extends LitElement {
   private fullscreenRestoreFrame?: number;
   private fullscreenRestoreFrame2?: number;
   private fullscreenRestoreToken = 0;
+  private companionKeepScreenWarned = false;
+  private companionKeepScreenReleaseTimer?: number;
+  private companionKeepScreenEntering = false;
+  private screenAwakeVideo?: HTMLVideoElement;
+  private screenAwakeStream?: MediaStream;
+  private screenAwakeTimer?: number;
+  private screenDimTimer?: number;
+  private screenDimReleaseTimer?: number;
+  private screenDimGeneration = 0;
+  private screenDimHold = false;
+  private screenDimmed = false;
+  private screenDimWarned = false;
+  private screenDimRestore?: { service: string; level: number; auto: boolean };
+  private screenDimRestoreFlight?: Promise<void>;
 
   private pointers = new Map<number, PointerState>();
   private gesture: PointerGesture = null;
@@ -367,12 +385,18 @@ export class TouchpadCard extends LitElement {
     this.applyActiveDeviceOptions();
     this.reconnectDelayMs = RECONNECT_BASE_MS;
     this.connect();
+    this.syncCompanionKeepScreen();
   }
 
   public connectedCallback(): void {
     super.connectedCallback();
     document.addEventListener('fullscreenchange', this.handleFullscreenChange);
     document.addEventListener('webkitfullscreenchange', this.handleFullscreenChange);
+    this.unbindScreenDimActivity();
+    this.bindScreenDimActivity();
+    this.cancelScreenDimRelease();
+    this.cancelCompanionKeepScreenRelease();
+    this.syncCompanionKeepScreen();
     if (this.detachTimer) {
       clearTimeout(this.detachTimer);
       this.detachTimer = undefined;
@@ -394,6 +418,9 @@ export class TouchpadCard extends LitElement {
     super.disconnectedCallback();
     document.removeEventListener('fullscreenchange', this.handleFullscreenChange);
     document.removeEventListener('webkitfullscreenchange', this.handleFullscreenChange);
+    this.unbindScreenDimActivity();
+    this.detachScreenDim();
+    this.scheduleCompanionKeepScreenRelease();
     if (this.tapTimer) {
       clearTimeout(this.tapTimer);
       this.tapTimer = undefined;
@@ -2211,6 +2238,367 @@ export class TouchpadCard extends LitElement {
     return null;
   }
 
+  private screenShouldStayOn(): boolean {
+    return this._config?.keep_screen_on === true && (this._fullscreenActive || this.companionKeepScreenEntering);
+  }
+
+  private syncCompanionKeepScreen(): void {
+    const attached = this.isConnected || this.companionKeepScreenReleaseTimer != null;
+    if (attached && this.screenShouldStayOn()) {
+      this.startScreenAwakeVideo();
+    } else {
+      this.releaseCompanionKeepScreen();
+    }
+    this.syncScreenDim();
+  }
+
+  private screenDimDesired(): boolean {
+    return this._config?.dim_screen === true && this._fullscreenActive && (this.isConnected || this.screenDimReleaseTimer != null);
+  }
+
+  private screenDimDelayMs(): number {
+    const raw = Number(this._config?.dim_screen_seconds);
+    const seconds = Number.isFinite(raw) && raw >= 1 ? raw : SCREEN_DIM_DEFAULT_SECONDS;
+    return Math.min(Math.round(seconds), SCREEN_DIM_MAX_SECONDS) * 1000;
+  }
+
+  private syncScreenDim(): void {
+    if (!this.screenDimDesired()) {
+      this.clearScreenDimTimer();
+      if (this.screenDimmed || this.screenDimHold) void this.restoreScreenBrightness();
+      return;
+    }
+    if (this.screenDimHold || this.screenDimTimer != null) return;
+    this.armScreenDimTimer();
+  }
+
+  private bindScreenDimActivity(): void {
+    this.addEventListener('pointerdown', this.handleScreenDimActivity);
+    this.addEventListener('pointermove', this.handleScreenDimActivity);
+    this.addEventListener('wheel', this.handleScreenDimActivity);
+    this.addEventListener('keydown', this.handleScreenDimActivity);
+  }
+
+  private unbindScreenDimActivity(): void {
+    this.removeEventListener('pointerdown', this.handleScreenDimActivity);
+    this.removeEventListener('pointermove', this.handleScreenDimActivity);
+    this.removeEventListener('wheel', this.handleScreenDimActivity);
+    this.removeEventListener('keydown', this.handleScreenDimActivity);
+  }
+
+  private handleScreenDimActivity = (ev: Event): void => {
+    if (!this.screenDimDesired()) return;
+    if (ev instanceof PointerEvent && ev.type === 'pointermove' && ev.pointerType === 'mouse' && ev.buttons === 0) return;
+    if (this.screenDimHold || this.screenDimmed) {
+      void this.restoreScreenBrightness().then(() => {
+        if (this.screenDimDesired() && !this.screenDimHold) this.armScreenDimTimer();
+      });
+      return;
+    }
+    this.armScreenDimTimer();
+  };
+
+  private armScreenDimTimer(): void {
+    this.clearScreenDimTimer();
+    if (!this.screenDimDesired() || this.screenDimHold) return;
+    this.screenDimTimer = window.setTimeout(() => {
+      this.screenDimTimer = undefined;
+      void this.dimScreenBrightness();
+    }, this.screenDimDelayMs());
+  }
+
+  private clearScreenDimTimer(): void {
+    if (this.screenDimTimer == null) return;
+    window.clearTimeout(this.screenDimTimer);
+    this.screenDimTimer = undefined;
+  }
+
+  private detachScreenDim(): void {
+    this.clearScreenDimTimer();
+    if (!this.screenDimmed && !this.screenDimHold && !this.screenDimRestore) return;
+    this.cancelScreenDimRelease();
+    this.screenDimReleaseTimer = window.setTimeout(() => {
+      this.screenDimReleaseTimer = undefined;
+      if (!this.isConnected) void this.restoreScreenBrightness();
+    }, 2000);
+  }
+
+  private cancelScreenDimRelease(): void {
+    if (this.screenDimReleaseTimer == null) return;
+    window.clearTimeout(this.screenDimReleaseTimer);
+    this.screenDimReleaseTimer = undefined;
+  }
+
+  private companionNotifyIds(): string[] {
+    const notify = this.hass?.services?.notify;
+    if (!notify) return [];
+    return Object.keys(notify).filter((id) => id.startsWith('mobile_app_'));
+  }
+
+  private screenBrightnessAuto(attributes: Record<string, unknown> | undefined): boolean {
+    const value = attributes?.is_auto ?? attributes?.auto_brightness ?? attributes?.automatic;
+    return value === true || value === 'true' || value === 'on';
+  }
+
+  private screenBrightnessSensors(): Array<{ slug: string; level?: number; auto: boolean }> {
+    const states = this.hass?.states;
+    if (!states) return [];
+    const sensors = [];
+    for (const entityId of Object.keys(states)) {
+      if (!entityId.startsWith('sensor.') || !entityId.endsWith('_screen_brightness')) continue;
+      const slug = entityId.slice('sensor.'.length, -'_screen_brightness'.length);
+      if (!slug) continue;
+      const entity = states[entityId];
+      const level = Number(entity?.state);
+      sensors.push({
+        slug,
+        level: Number.isFinite(level) ? Math.round(level) : undefined,
+        auto: this.screenBrightnessAuto(entity?.attributes as Record<string, unknown> | undefined),
+      });
+    }
+    return sensors;
+  }
+
+  private companionScreenTarget(): { service: string; slug: string; level?: number; auto: boolean } | undefined {
+    const sensors = this.screenBrightnessSensors();
+    const withLevel = sensors.filter((sensor) => sensor.level !== undefined);
+    const pool = withLevel.length > 0 ? withLevel : sensors;
+    let chosen = pool.length === 1 ? pool[0] : undefined;
+    if (!chosen && pool.length > 1) {
+      const interactive = pool.filter(
+        (sensor) => this.hass?.states[`binary_sensor.${sensor.slug}_interactive`]?.state === 'on'
+      );
+      if (interactive.length === 1) chosen = interactive[0];
+    }
+    if (chosen) {
+      const ids = this.companionNotifyIds();
+      const exact = `mobile_app_${chosen.slug}`;
+      const service = ids.includes(exact) || ids.length === 0 ? exact : ids.length === 1 ? ids[0] : undefined;
+      if (!service) return undefined;
+      return { service, slug: chosen.slug, level: chosen.level, auto: chosen.auto };
+    }
+
+    const ids = this.companionNotifyIds();
+    const interactive = ids.filter((id) => this.hass?.states[`binary_sensor.${id.slice('mobile_app_'.length)}_interactive`]?.state === 'on');
+    const service = ids.length === 1 ? ids[0] : interactive.length === 1 ? interactive[0] : undefined;
+    if (!service) return undefined;
+    const slug = service.slice('mobile_app_'.length);
+    const reading = sensors.find((sensor) => sensor.slug === slug);
+    return { service, slug, level: reading?.level, auto: reading?.auto ?? false };
+  }
+
+  private async companionScreenCommand(service: string, message: string, command?: number | string): Promise<void> {
+    if (!this.hass) throw new Error('Home Assistant is unavailable.');
+    const data = command === undefined ? { message } : { message, data: { command: String(command) } };
+    await this.callHAService(`notify.${service}`, data, undefined);
+  }
+
+  private async refreshCompanionBrightness(target: {
+    service: string;
+    slug: string;
+    level?: number;
+    auto: boolean;
+  }): Promise<typeof target | undefined> {
+    if (target.level !== undefined) return target;
+    await this.companionScreenCommand(target.service, 'command_update_sensors');
+    await new Promise((resolve) => window.setTimeout(resolve, 1500));
+    if (!this.screenDimDesired()) return undefined;
+    const reading = this.screenBrightnessSensors().find((sensor) => sensor.slug === target.slug);
+    if (!reading) return target;
+    return { ...target, level: reading.level, auto: reading.auto };
+  }
+
+  private warnScreenDim(message: string, detail?: unknown): void {
+    if (this.screenDimWarned) return;
+    this.screenDimWarned = true;
+    logCardWarn(message, detail);
+    this.showAppNotice(message);
+  }
+
+  private async dimScreenBrightness(): Promise<void> {
+    if (!this.screenDimDesired() || this.screenDimHold) return;
+    const found = this.companionScreenTarget();
+    let target = found;
+    if (found && found.level === undefined) {
+      try {
+        target = await this.refreshCompanionBrightness(found);
+      } catch (err) {
+        this.warnScreenDim('Could not read the Android screen brightness.', err);
+        target = found;
+      }
+    }
+    if (!this.screenDimDesired() || this.screenDimHold) return;
+    if (!target) {
+      const count = this.screenBrightnessSensors().length;
+      this.warnScreenDim(
+        count > 1
+          ? 'Could not dim the screen. More than one Android brightness sensor is on.'
+          : 'Could not dim the screen. Turn on the Android screen brightness sensor.'
+      );
+      this.armScreenDimTimer();
+      return;
+    }
+    if (target.level === undefined) {
+      this.warnScreenDim('Could not dim the screen. The brightness sensor has no value yet.');
+      this.armScreenDimTimer();
+      return;
+    }
+    if (target.level <= SCREEN_DIM_LEVEL) {
+      this.armScreenDimTimer();
+      return;
+    }
+    const previous = { level: target.level, auto: target.auto };
+    const generation = ++this.screenDimGeneration;
+    this.screenDimHold = true;
+    this.screenDimRestore = { service: target.service, level: previous.level, auto: previous.auto };
+    try {
+      if (previous.auto) await this.companionScreenCommand(target.service, 'command_auto_screen_brightness', 'turn_off');
+      if (generation !== this.screenDimGeneration || !this.screenDimDesired()) {
+        await this.restoreScreenBrightness();
+        return;
+      }
+      await this.companionScreenCommand(target.service, 'command_screen_brightness_level', SCREEN_DIM_LEVEL);
+      if (generation !== this.screenDimGeneration || !this.screenDimDesired()) {
+        await this.restoreScreenBrightness();
+        return;
+      }
+      this.screenDimmed = true;
+    } catch (err) {
+      this.warnScreenDim('Could not dim the screen.', err);
+      await this.restoreScreenBrightness();
+      if (this.screenDimDesired() && !this.screenDimHold) this.armScreenDimTimer();
+    }
+  }
+
+  private restoreScreenBrightness(): Promise<void> {
+    if (this.screenDimRestoreFlight) return this.screenDimRestoreFlight;
+    const saved = this.screenDimRestore;
+    this.screenDimGeneration += 1;
+    this.clearScreenDimTimer();
+    this.screenDimmed = false;
+    this.screenDimHold = false;
+    this.screenDimRestore = undefined;
+    if (!saved) return Promise.resolve();
+    const flight = (async () => {
+      try {
+        await this.companionScreenCommand(saved.service, 'command_screen_brightness_level', saved.level);
+        if (saved.auto) await this.companionScreenCommand(saved.service, 'command_auto_screen_brightness', 'turn_on');
+      } catch (err) {
+        this.screenDimRestore = saved;
+        this.screenDimHold = true;
+        this.screenDimmed = true;
+        logCardWarn('Could not restore the screen brightness.', err);
+      }
+    })();
+    this.screenDimRestoreFlight = flight;
+    void flight.finally(() => {
+      if (this.screenDimRestoreFlight === flight) this.screenDimRestoreFlight = undefined;
+    });
+    return flight;
+  }
+
+  private releaseCompanionKeepScreen(): void {
+    this.cancelCompanionKeepScreenRelease();
+    this.companionKeepScreenEntering = false;
+    this.stopScreenAwakeVideo();
+  }
+
+  private scheduleCompanionKeepScreenRelease(): void {
+    if (!this.screenAwakeVideo) return;
+    this.cancelCompanionKeepScreenRelease();
+    this.companionKeepScreenReleaseTimer = window.setTimeout(() => {
+      this.companionKeepScreenReleaseTimer = undefined;
+      if (!this.isConnected) this.releaseCompanionKeepScreen();
+    }, 2000);
+  }
+
+  private cancelCompanionKeepScreenRelease(): void {
+    if (this.companionKeepScreenReleaseTimer == null) return;
+    window.clearTimeout(this.companionKeepScreenReleaseTimer);
+    this.companionKeepScreenReleaseTimer = undefined;
+  }
+
+  private warnCompanionKeepScreen(message: string, detail?: unknown): void {
+    if (this.companionKeepScreenWarned) return;
+    this.companionKeepScreenWarned = true;
+    logCardWarn(message, detail);
+  }
+
+  private startScreenAwakeVideo(): void {
+    if (!this.screenShouldStayOn()) return;
+    const stream = this.screenAwakeStream ?? (this.startScreenAwakeStream() ? this.screenAwakeStream : undefined);
+    if (!stream) return;
+    const video = this.screenAwakeVideo ?? this.createScreenAwakeVideo();
+    if (video.srcObject !== stream) video.srcObject = stream;
+    this.attachScreenAwakeVideo();
+    if (!video.paused) return;
+    const playPromise = video.play();
+    if (!playPromise) return;
+    void playPromise.catch((err) => {
+      if (this.screenAwakeVideo !== video || !this.screenShouldStayOn()) return;
+      this.warnCompanionKeepScreen('Could not keep the screen awake.', err);
+    });
+  }
+
+  private startScreenAwakeStream(): boolean {
+    const canvas = document.createElement('canvas');
+    canvas.width = 16;
+    canvas.height = 16;
+    const ctx = canvas.getContext('2d', { alpha: false });
+    if (!ctx || typeof canvas.captureStream !== 'function') return false;
+    const draw = () => {
+      const card = this.renderRoot.querySelector('ha-card');
+      const color = card ? getComputedStyle(card).backgroundColor : '';
+      ctx.fillStyle = color && color !== 'rgba(0, 0, 0, 0)' ? color : '#161c29';
+      ctx.fillRect(0, 0, 16, 16);
+    };
+    draw();
+    this.screenAwakeTimer = window.setInterval(draw, 1000);
+    this.screenAwakeStream = canvas.captureStream(5);
+    return true;
+  }
+
+  private createScreenAwakeVideo(): HTMLVideoElement {
+    const video = document.createElement('video');
+    video.className = 'screen-awake';
+    video.muted = true;
+    video.defaultMuted = true;
+    video.autoplay = true;
+    video.playsInline = true;
+    video.setAttribute('playsinline', '');
+    video.setAttribute('webkit-playsinline', '');
+    video.setAttribute('muted', '');
+    video.setAttribute('aria-hidden', 'true');
+    video.disablePictureInPicture = true;
+    this.screenAwakeVideo = video;
+    return video;
+  }
+
+  private attachScreenAwakeVideo(): void {
+    const video = this.screenAwakeVideo;
+    if (!video) return;
+    const slot = this.renderRoot.querySelector('.screen-awake-slot');
+    if (!slot) return;
+    if (video.parentNode !== slot) slot.append(video);
+  }
+
+  private stopScreenAwakeVideo(): void {
+    const video = this.screenAwakeVideo;
+    if (this.screenAwakeTimer != null) {
+      window.clearInterval(this.screenAwakeTimer);
+      this.screenAwakeTimer = undefined;
+    }
+    this.screenAwakeStream?.getTracks().forEach((track) => track.stop());
+    this.screenAwakeStream = undefined;
+    if (!video) return;
+    this.screenAwakeVideo = undefined;
+    video.pause();
+    video.srcObject = null;
+    video.removeAttribute('src');
+    video.load();
+    video.remove();
+  }
+
   private handleFullscreenChange = (): void => {
     const fullscreenElement = this.currentFullscreenElement();
     const ownsFullscreen =
@@ -2219,12 +2607,16 @@ export class TouchpadCard extends LitElement {
     if (ownsFullscreen || (fullscreenElement && this.fullscreenMode === 'native')) {
       this.fullscreenMode = 'native';
       this._fullscreenActive = true;
+      this.companionKeepScreenEntering = false;
+      this.syncCompanionKeepScreen();
       return;
     }
 
     if (this.fullscreenMode === 'native') {
       this.fullscreenMode = null;
       this._fullscreenActive = false;
+      this.companionKeepScreenEntering = false;
+      this.syncCompanionKeepScreen();
       this.scheduleFullscreenScrollRestore();
     }
   };
@@ -2234,12 +2626,16 @@ export class TouchpadCard extends LitElement {
 
     this.captureFullscreenScroll();
     this.resetInteractionState();
+    this.companionKeepScreenEntering = this._config?.keep_screen_on === true;
+    this.syncCompanionKeepScreen();
     const nativeRequest = this.requestNativeFullscreen();
     if (nativeRequest) {
       this.fullscreenMode = 'native';
       try {
         await nativeRequest;
         this._fullscreenActive = true;
+        this.companionKeepScreenEntering = false;
+        this.syncCompanionKeepScreen();
         return;
       } catch (err) {
         this.fullscreenMode = null;
@@ -2249,6 +2645,8 @@ export class TouchpadCard extends LitElement {
 
     this.fullscreenMode = 'soft';
     this._fullscreenActive = true;
+    this.companionKeepScreenEntering = false;
+    this.syncCompanionKeepScreen();
   };
 
   private exitFullscreen = async (): Promise<void> => {
@@ -2258,6 +2656,8 @@ export class TouchpadCard extends LitElement {
     const hasNativeFullscreen = Boolean(this.currentFullscreenElement()) || this.fullscreenMode === 'native';
     this.fullscreenMode = null;
     this._fullscreenActive = false;
+    this.companionKeepScreenEntering = false;
+    this.syncCompanionKeepScreen();
 
     if (hasNativeFullscreen) {
       const nativeExit = this.exitNativeFullscreen();
@@ -2586,6 +2986,14 @@ export class TouchpadCard extends LitElement {
     }
   }
 
+  protected updated(changed: PropertyValues): void {
+    if (changed.has('hass')) this.syncCompanionKeepScreen();
+    const video = this.screenAwakeVideo;
+    if (!video) return;
+    this.attachScreenAwakeVideo();
+    if (video.paused && this.screenShouldStayOn()) void video.play().catch(() => undefined);
+  }
+
   private canShowAppLauncherToggle(): boolean {
     return this.opts.showAppButtons && this.visibleShortcuts().length > 0;
   }
@@ -2630,6 +3038,7 @@ export class TouchpadCard extends LitElement {
 
     return html`
       <ha-card class=${cardClass} @contextmenu=${(e: Event) => e.preventDefault()}>
+        <div class="screen-awake-slot"></div>
         ${showDeviceTabs
           ? html`<div
               class="device-tabs"
@@ -2894,7 +3303,37 @@ export class TouchpadCard extends LitElement {
     }
 
     ha-card {
+      position: relative;
       overflow: hidden;
+    }
+
+    .screen-awake-slot {
+      position: absolute;
+      right: 0;
+      bottom: 0;
+      z-index: 0;
+      width: 16px;
+      height: 16px;
+      overflow: hidden;
+      pointer-events: none;
+    }
+
+    ha-card.fullscreen .screen-awake-slot,
+    :host(:fullscreen) .screen-awake-slot {
+      right: env(safe-area-inset-right);
+      bottom: env(safe-area-inset-bottom);
+    }
+
+    video.screen-awake {
+      display: block;
+      width: 16px;
+      height: 16px;
+      pointer-events: none;
+    }
+
+    ha-card > :not(.screen-awake-slot) {
+      position: relative;
+      z-index: 1;
     }
 
     ha-card.fullscreen,

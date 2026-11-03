@@ -256,7 +256,7 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
   private _renderEditorFooter(): TemplateResult {
     return html`
       <div class="editor-footer">
-        LTC v0.16.0
+        LTC v0.17.0
         <span aria-hidden="true">&bull;</span>
         <a target="_blank" rel="noopener" href="https://michalowskil.github.io/lovelace-touchpad-card/">Documentation</a>
       </div>
@@ -277,6 +277,43 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
           />
           <span>Show the device bar when only one device is configured.</span>
         </label>
+        <label class="toggle">
+          <input
+            type="checkbox"
+            .checked=${config.keep_screen_on === true}
+            @change=${(ev: Event) => this._updateRootField('keep_screen_on', (ev.target as HTMLInputElement).checked)}
+          />
+          <span>Keep the screen awake while this card is fullscreen (experimental, plays a background video, tested on Android only).</span>
+        </label>
+        <div class="option-with-link">
+          <label class="toggle">
+            <input
+              type="checkbox"
+              .checked=${config.dim_screen === true}
+              @change=${(ev: Event) => this._updateRootField('dim_screen', (ev.target as HTMLInputElement).checked)}
+            />
+            <span>Dim the screen after inactivity while this card is fullscreen (experimental, tested on Android only).</span>
+          </label>
+          <a
+            class="option-docs"
+            target="_blank"
+            rel="noopener"
+            href="https://michalowskil.github.io/lovelace-touchpad-card/#dim-the-screen"
+            >Details</a
+          >
+        </div>
+        ${config.dim_screen === true
+          ? html`<div class="fields">
+              ${this._renderNumberField(
+                'Dim after (seconds)',
+                config.dim_screen_seconds,
+                30,
+                '1',
+                (value) => this._updateRootField('dim_screen_seconds', value),
+                '1'
+              )}
+            </div>`
+          : null}
       </section>
     `;
   }
@@ -938,7 +975,8 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
     value: number | undefined,
     placeholder: number,
     step: string,
-    update: (value: number | undefined) => void
+    update: (value: number | undefined) => void,
+    min = '0'
   ): TemplateResult {
     return html`
       <label class="field">
@@ -948,7 +986,7 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
           .value=${value === undefined ? '' : String(value)}
           placeholder=${String(placeholder)}
           step=${step}
-          min="0"
+          min=${min}
           @change=${(ev: Event) => update(this._parseNumber((ev.target as HTMLInputElement).value))}
         />
       </label>
@@ -2033,6 +2071,28 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
     .toggle input {
       flex: 0 0 auto;
       margin-left: 0;
+    }
+
+    .option-with-link {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px 12px;
+    }
+
+    .option-with-link .toggle {
+      flex: 1 1 16rem;
+    }
+
+    .option-docs {
+      flex: 0 0 auto;
+      color: var(--primary-color);
+      font-size: 13px;
+      text-decoration: none;
+    }
+
+    .option-docs:hover {
+      text-decoration: underline;
     }
 
     .ha-gesture-actions {
