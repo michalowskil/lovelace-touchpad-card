@@ -256,7 +256,7 @@ export class TouchpadCardEditor extends LitElement implements LovelaceCardEditor
   private _renderEditorFooter(): TemplateResult {
     return html`
       <div class="editor-footer">
-        LTC v0.17.0
+        LTC v0.17.1
         <span aria-hidden="true">&bull;</span>
         <a target="_blank" rel="noopener" href="https://michalowskil.github.io/lovelace-touchpad-card/">Documentation</a>
       </div>

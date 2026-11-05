@@ -1,5 +1,8 @@
 # Card Changelog
 
+## 0.17.1
+- Updated the installation instructions for HACS and Marketplace.
+
 ## 0.17.0
 - Added an option to keep the screen awake while this card is fullscreen. It is off by default, experimental, and plays a small background video. Tested on the Android Home Assistant Companion app only.
 - Added an option to dim the Android screen after a chosen period of inactivity while this card is fullscreen. Touching the screen restores the previous brightness. It is off by default and experimental. An empty time uses 30 seconds.

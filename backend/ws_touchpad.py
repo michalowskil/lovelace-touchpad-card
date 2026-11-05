@@ -1,6 +1,6 @@
 """
 https://michalowskil.github.io/lovelace-touchpad-card/
-LICENSE: CC BY-NC-ND 4.0
+LICENSE: Apache-2.0
 
 Simple WebSocket listener that injects mouse events on Windows using SendInput.
 

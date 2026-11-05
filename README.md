@@ -21,18 +21,19 @@ If you like this project, please consider giving it a ⭐ on GitHub: [![Star on 
 
 Choose one installation method, via [HACS](https://www.hacs.xyz/docs/use/download/download/) or manually.
 
-### HACS – Custom repository
-1. HACS → ⋮ → **Custom repositories** → add  
-   `https://github.com/michalowskil/lovelace-touchpad-card` (Type: **Dashboard**)  
-   or click: [![Add to HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=michalowskil&repository=lovelace-touchpad-card&category=plugin)
-2. Install **Lovelace Touchpad Card**.
-3. Resource is added automatically as `/hacsfiles/lovelace-touchpad-card/touchpad-card.js`.
-4. Hard refresh the browser if needed.
+HACS is built into Home Assistant as the Marketplace (**Settings → Marketplace**), starting with 2026.11. [What this means for you](https://www.hacs.xyz/docs/marketplace/).
+
+### HACS/Marketplace
+
+1. In HACS/Marketplace use the search bar and type **Lovelace Touchpad Card**.
+2. Install the card.
+3. Reload browser cache if needed.
 
 ### Manual
+
 1. Download `touchpad-card.js` from the latest release and place it under  
    `config/www/touchpad-card/touchpad-card.js`.
-2. Add a resource in **Edit Dashboard → Manage resources**:  
+2. Add a resource in **Edit Dashboard → ⋮ → Manage resources**:  
    `/local/touchpad-card/touchpad-card.js` (type: **JavaScript module**).
 3. Hard refresh the browser.
 
@@ -300,7 +301,7 @@ The first time, Companion asks for permission to change system settings. It open
 The card dims the phone that reports the screen brightness sensor, then restores that brightness. If more than one phone has this sensor enabled, the card does not guess and shows a message instead.
 
 ## Changelog
-- **Card (frontend):** latest v0.17.0 — see [CHANGELOG.md](CHANGELOG.md). Highlights: fullscreen can keep the Android screen awake, and can dim it after a chosen idle time. Both are experimental.
+- **Card (frontend):** latest v0.17.1 — see [CHANGELOG.md](CHANGELOG.md). Highlights: installation instructions now cover HACS and Marketplace.
 - **Windows backend:** latest v0.5.1 — see [backend/CHANGELOG.md](backend/CHANGELOG.md). Highlights: tray update checks now track the Windows backend version, so card-only releases do not notify Windows users.
 - **webOS add-on:** latest v0.4.1 — see [addon/webos-pointer-bridge/CHANGELOG.md](addon/webos-pointer-bridge/CHANGELOG.md). Highlights: the touchpad port opens before the TV handshake, and pointer input no longer waits on the IME socket.
 
