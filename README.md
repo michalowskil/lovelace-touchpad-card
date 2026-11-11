@@ -87,24 +87,22 @@ release tag:
 ghcr.io/michalowskil/lovelace-touchpad-card/webos-pointer-bridge:latest
 ```
 
-1. Create a file named `tvs.json`:
+1. Create a file named `tvs.yaml`:
 
-   ```json
-   {
-     "tvs": [
-       {
-         "name": "livingroom",
-         "host": "192.168.0.129",
-         "listen_port": 8777,
-         "tv_port": 3001,
-         "use_ssl": true
-       }
-     ]
-   }
+   ```yaml
+   tvs:
+     - name: livingroom
+       host: 192.168.0.129
+       listen_port: 8777
+       tv_port: 3001
+       use_ssl: true
    ```
 
    Add more entries to the `tvs` array for additional TVs. Each TV must use a
-   different `listen_port`.
+   different `listen_port`. YAML files with either `.yaml` or `.yml` extensions
+   are supported, and JSON files are read directly without conversion. The
+   standalone image defaults to `OPTIONS_PATH=/config/tvs.yaml`; to use JSON,
+   set `-e OPTIONS_PATH=/config/tvs.json` and mount that file instead.
 2. Start the container and persist its pairing keys:
 
    ```sh
@@ -112,7 +110,7 @@ ghcr.io/michalowskil/lovelace-touchpad-card/webos-pointer-bridge:latest
      --name webos-pointer-bridge \
      --restart unless-stopped \
      -p 8777:8777 \
-     -v "$(pwd)/tvs.json:/config/tvs.json:ro" \
+     -v "$(pwd)/tvs.yaml:/config/tvs.yaml:ro" \
      -v webos-pointer-bridge-data:/data \
      ghcr.io/michalowskil/lovelace-touchpad-card/webos-pointer-bridge:latest
    ```
@@ -122,7 +120,7 @@ ghcr.io/michalowskil/lovelace-touchpad-card/webos-pointer-bridge:latest
    through its normal Docker network; the WebSocket ports still need to be
    published.
 
-   As an alternative, save this as `compose.yaml` next to `tvs.json`:
+   As an alternative, save this as `compose.yaml` next to `tvs.yaml`:
 
    ```yaml
    services:
@@ -133,7 +131,7 @@ ghcr.io/michalowskil/lovelace-touchpad-card/webos-pointer-bridge:latest
        ports:
          - "8777:8777"
        volumes:
-         - ./tvs.json:/config/tvs.json:ro
+         - ./options.yaml:/data/options.yaml:ro
          - webos-pointer-bridge-data:/data
 
    volumes:

@@ -19,7 +19,20 @@ logger = logging.getLogger(__name__)
 
 def load_options() -> list[dict[str, Any]]:
     raw = OPTIONS_PATH.read_text(encoding="utf-8")
-    data = json.loads(raw)
+    if OPTIONS_PATH.suffix.lower() in {".yaml", ".yml"}:
+        try:
+            import yaml  # type: ignore
+        except ImportError as err:
+            raise RuntimeError(
+                "YAML options require PyYAML; use JSON for the Home Assistant add-on"
+            ) from err
+
+        data = yaml.safe_load(raw)
+    else:
+        data = json.loads(raw)
+
+    if not isinstance(data, dict):
+        raise TypeError("options must contain an object at the top level")
     tvs = data.get("tvs") or []
     if not isinstance(tvs, list):
         raise TypeError("options.tvs must be a list")
