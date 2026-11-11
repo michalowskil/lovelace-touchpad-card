@@ -3,10 +3,9 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 from webos_pointer_bridge import WebOSPointerBridge
-
 
 DEFAULT_TV_PORT = 3001
 DEFAULT_USE_SSL = True
@@ -15,19 +14,20 @@ DEFAULT_LISTEN_BASE = 8777
 OPTIONS_PATH = Path(os.environ.get("OPTIONS_PATH", "/data/options.json"))
 KEYS_DIR = Path(os.environ.get("KEYS_DIR", "/data/keys"))
 RETRY_DELAY_SECONDS = 5
+logger = logging.getLogger(__name__)
 
 
-def load_options() -> List[Dict[str, Any]]:
+def load_options() -> list[dict[str, Any]]:
     raw = OPTIONS_PATH.read_text(encoding="utf-8")
     data = json.loads(raw)
     tvs = data.get("tvs") or []
     if not isinstance(tvs, list):
-        raise ValueError("options.tvs must be a list")
+        raise TypeError("options.tvs must be a list")
     return tvs
 
 
-def build_tv_configs(tvs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    configs: List[Dict[str, Any]] = []
+def build_tv_configs(tvs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    configs: list[dict[str, Any]] = []
     for idx, tv in enumerate(tvs):
         host = tv.get("host")
         if not host or not isinstance(host, str):
@@ -59,7 +59,7 @@ def build_tv_configs(tvs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return configs
 
 
-async def run_bridge(tv_cfg: Dict[str, Any]) -> None:
+async def run_bridge(tv_cfg: dict[str, Any]) -> None:
     name = tv_cfg["name"]
     key_path = KEYS_DIR / f"{name}.json"
     key_path.parent.mkdir(parents=True, exist_ok=True)
@@ -77,12 +77,12 @@ async def run_bridge(tv_cfg: Dict[str, Any]) -> None:
 
     while True:
         try:
-            logging.info("Starting bridge for %s (ws://0.0.0.0:%s -> %s)", name, tv_cfg["listen_port"], tv_cfg["host"])
+            logger.info("Starting bridge for %s (ws://0.0.0.0:%s -> %s)", name, tv_cfg["listen_port"], tv_cfg["host"])
             await bridge.start()
         except asyncio.CancelledError:
             raise
         except (TimeoutError, OSError) as err:
-            logging.warning(
+            logger.warning(
                 "Bridge for %s could not connect (%s: %s); retrying in %ss",
                 name,
                 type(err).__name__,
@@ -91,7 +91,7 @@ async def run_bridge(tv_cfg: Dict[str, Any]) -> None:
             )
             await asyncio.sleep(RETRY_DELAY_SECONDS)
         except Exception:
-            logging.exception("Bridge for %s crashed; retrying in %ss", name, RETRY_DELAY_SECONDS)
+            logger.exception("Bridge for %s crashed; retrying in %ss", name, RETRY_DELAY_SECONDS)
             await asyncio.sleep(RETRY_DELAY_SECONDS)
 
 
@@ -104,11 +104,11 @@ async def main() -> None:
         tvs_raw = load_options()
         configs = build_tv_configs(tvs_raw)
     except Exception:
-        logging.exception("Failed to load add-on options")
+        logger.exception("Failed to load add-on options")
         return
 
     if not configs:
-        logging.warning("No TVs configured; nothing to do.")
+        logger.warning("No TVs configured; nothing to do.")
         await asyncio.Future()
         return
 
