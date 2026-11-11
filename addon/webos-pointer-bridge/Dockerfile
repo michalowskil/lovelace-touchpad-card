@@ -14,4 +14,4 @@ COPY run.sh ./run.sh
 
 RUN chmod +x /opt/webos-bridge/run.sh
 
-CMD ["/opt/webos-bridge/run.sh"]
+CMD ["/opt/webos-bridge/run.sh", "/opt/webos-bridge/venv/bin/python"]

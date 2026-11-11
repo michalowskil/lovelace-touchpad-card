@@ -6,9 +6,9 @@ RUN pip install --no-cache-dir websockets==15.0.1 PyYAML==6.0.2
 
 COPY webos_pointer_bridge.py ./webos_pointer_bridge.py
 COPY run_addon.py ./run_addon.py
-COPY run_standalone.sh ./run_standalone.sh
+COPY run.sh ./run.sh
 
-RUN chmod +x /opt/webos-bridge/run_standalone.sh
+RUN chmod +x /opt/webos-bridge/run.sh
 
 ENV OPTIONS_PATH=/data/options.yaml \
     KEYS_DIR=/data/keys
@@ -16,4 +16,4 @@ ENV OPTIONS_PATH=/data/options.yaml \
 VOLUME ["/config", "/data"]
 EXPOSE 8777
 
-CMD ["/opt/webos-bridge/run_standalone.sh"]
+CMD ["/opt/webos-bridge/run.sh", "python"]
