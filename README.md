@@ -121,6 +121,33 @@ ghcr.io/michalowskil/lovelace-touchpad-card/webos-pointer-bridge:latest
    `listen_port`. The container can make outgoing connections to the TVs
    through its normal Docker network; the WebSocket ports still need to be
    published.
+
+   As an alternative, save this as `compose.yaml` next to `tvs.json`:
+
+   ```yaml
+   services:
+     webos-pointer-bridge:
+       image: ghcr.io/michalowskil/lovelace-touchpad-card/webos-pointer-bridge:latest
+       container_name: webos-pointer-bridge
+       restart: unless-stopped
+       ports:
+         - "8777:8777"
+       volumes:
+         - ./tvs.json:/config/tvs.json:ro
+         - webos-pointer-bridge-data:/data
+
+   volumes:
+     webos-pointer-bridge-data:
+   ```
+
+   Start it with:
+
+   ```sh
+   docker compose up -d
+   ```
+
+   Add one `HOST_PORT:CONTAINER_PORT` entry for every additional TV
+   `listen_port`.
 3. Follow the pairing prompt on the TV, then set the card's `wsUrl` to the
    container host and the matching port (for example
    `ws://docker-host:8777`). Use `docker logs -f webos-pointer-bridge` to
