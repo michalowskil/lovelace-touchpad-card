@@ -1,0 +1,19 @@
+FROM python:3.12-alpine
+
+WORKDIR /opt/webos-bridge
+
+RUN pip install --no-cache-dir websockets==15.0.1 PyYAML==6.0.2
+
+COPY webos_pointer_bridge.py ./webos_pointer_bridge.py
+COPY run_addon.py ./run_addon.py
+COPY run.sh ./run.sh
+
+RUN chmod +x /opt/webos-bridge/run.sh
+
+ENV OPTIONS_PATH=/data/options.yaml \
+    KEYS_DIR=/data/keys
+
+VOLUME ["/config", "/data"]
+EXPOSE 8777
+
+CMD ["/opt/webos-bridge/run.sh", "python"]
