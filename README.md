@@ -77,6 +77,59 @@ Add the card in the UI and configure everything from the visual editor.
 4. Start the add-on and enable **Start on boot** and **Watchdog** if desired.
 5. In each touchpad card set `wsUrl` to the matching port (for example `ws://homeassistant.local:8777`).
 
+## webOS backend (standalone Docker container)
+
+If you do not use Home Assistant Supervisor, run the webOS Pointer Bridge as a
+Docker or Podman container. The image is published automatically for every
+release tag:
+
+```text
+ghcr.io/michalowskil/lovelace-touchpad-card/webos-pointer-bridge:latest
+```
+
+1. Create a file named `tvs.json`:
+
+   ```json
+   {
+     "tvs": [
+       {
+         "name": "livingroom",
+         "host": "192.168.0.129",
+         "listen_port": 8777,
+         "tv_port": 3001,
+         "use_ssl": true
+       }
+     ]
+   }
+   ```
+
+   Add more entries to the `tvs` array for additional TVs. Each TV must use a
+   different `listen_port`.
+2. Start the container and persist its pairing keys:
+
+   ```sh
+   docker run -d \
+     --name webos-pointer-bridge \
+     --restart unless-stopped \
+     -p 8777:8777 \
+     -v "$(pwd)/tvs.json:/config/tvs.json:ro" \
+     -v webos-pointer-bridge-data:/data \
+     ghcr.io/michalowskil/lovelace-touchpad-card/webos-pointer-bridge:latest
+   ```
+
+   Publish one `-p HOST_PORT:CONTAINER_PORT` mapping for every configured
+   `listen_port`. The container can make outgoing connections to the TVs
+   through its normal Docker network; the WebSocket ports still need to be
+   published.
+3. Follow the pairing prompt on the TV, then set the card's `wsUrl` to the
+   container host and the matching port (for example
+   `ws://docker-host:8777`). Use `docker logs -f webos-pointer-bridge` to
+   monitor the bridge.
+
+The same image supports `linux/amd64` and `linux/arm64`. To pin a release,
+replace `latest` with the corresponding release tag, for example
+`v0.17.1`.
+
 ## Gesture Mode
 
 Enable **Show gesture mode button** in the card editor to show a gesture toggle on the touchpad. When the toggle is active, the touchpad stops moving the cursor and instead sends the configured gesture actions.

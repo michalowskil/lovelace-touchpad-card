@@ -1,0 +1,19 @@
+FROM python:3.12-alpine
+
+WORKDIR /opt/webos-bridge
+
+RUN pip install --no-cache-dir websockets==15.0.1
+
+COPY webos_pointer_bridge.py ./webos_pointer_bridge.py
+COPY run_addon.py ./run_addon.py
+COPY run_standalone.sh ./run_standalone.sh
+
+RUN chmod +x /opt/webos-bridge/run_standalone.sh
+
+ENV OPTIONS_PATH=/config/tvs.json \
+    KEYS_DIR=/data/keys
+
+VOLUME ["/config", "/data"]
+EXPOSE 8777
+
+CMD ["/opt/webos-bridge/run_standalone.sh"]

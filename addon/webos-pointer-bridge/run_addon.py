@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -11,8 +12,8 @@ DEFAULT_TV_PORT = 3001
 DEFAULT_USE_SSL = True
 DEFAULT_ORIGIN = None
 DEFAULT_LISTEN_BASE = 8777
-OPTIONS_PATH = Path("/data/options.json")
-KEYS_DIR = Path("/data/keys")
+OPTIONS_PATH = Path(os.environ.get("OPTIONS_PATH", "/data/options.json"))
+KEYS_DIR = Path(os.environ.get("KEYS_DIR", "/data/keys"))
 RETRY_DELAY_SECONDS = 5
 
 
