@@ -51,12 +51,13 @@ Add the card in the UI and configure everything from the visual editor.
 4. To auto-start, place a shortcut to `touchpad-server.exe` in Startup or create a scheduled task.
 5. Logs are written to `touchpad-server.log` next to the executable. Use the tray icon to view them live.
 
-## webOS backend (Home Assistant add-on)
+## webOS Bridge
+### Home Assistant Add-On
 
 1. In Home Assistant, go to Settings -> Apps -> Install app, open the three-dot menu, choose Repositories, and add:  
    `https://github.com/michalowskil/lovelace-touchpad-card`
-2. Install **webOS Pointer Bridge** from the add-on list.
-3. Open the add-on configuration and list your TVs. Example:
+2. Install **webOS Pointer Bridge** from the Add-On list.
+3. Open the Add-On configuration and list your TVs. Example:
 
    ```yaml
    tvs:
@@ -71,13 +72,13 @@ Add the card in the UI and configure everything from the visual editor.
        use_ssl: true
    ```
 
-   - `listen_port` is where the Lovelace card connects. The add-on runs in host network, so use your HA host IP.
+   - `listen_port` is where the Lovelace card connects. The Add-On runs in host network, so use your HA host IP.
    - Client keys are stored per TV in `/data/keys/<name>.json` and survive restarts.
    - `origin` is optional; leave it unset/empty unless your TV rejects the default. If needed, set it to `https://www.lge.com`, or to `""` to send no Origin header.
-4. Start the add-on and enable **Start on boot** and **Watchdog** if desired.
+4. Start the Add-On and enable **Start on boot** and **Watchdog** if desired.
 5. In each touchpad card set `wsUrl` to the matching port (for example `ws://homeassistant.local:8777`).
 
-## webOS backend (standalone Docker container)
+### Standalone Container
 
 If you do not use Home Assistant Supervisor, run the webOS Pointer Bridge as a
 Docker or Podman container. The image is published automatically for every
@@ -87,7 +88,7 @@ release tag:
 ghcr.io/michalowskil/lovelace-touchpad-card/webos-pointer-bridge:latest
 ```
 
-1. Create a file named `options.yaml` just like the add-on configuration. Example: 
+1. Create a file named `options.yaml` just like the Add-On configuration. Example: 
 
    ```yaml
    tvs:
@@ -158,7 +159,7 @@ ghcr.io/michalowskil/lovelace-touchpad-card/webos-pointer-bridge:latest
 
 The same image supports `linux/amd64` and `linux/arm64`. To pin a release,
 replace `latest` with the corresponding release tag, for example
-`v0.17.1`.
+`v0.4.1`.
 
 ## Gesture Mode
 
@@ -320,13 +321,13 @@ If you open Home Assistant through HTTPS (for example DuckDNS + NGINX), do not u
 Both backends listen with plain WebSocket (`ws://`) on their local ports:
 
 - Windows server: usually `ws://YOUR-PC-LAN-IP:8765`
-- webOS Pointer Bridge add-on: for example `ws://YOUR-HA-LAN-IP:8778`
+- webOS Pointer Bridge Add-On: for example `ws://YOUR-HA-LAN-IP:8778`
 
 To use either backend remotely, put it behind your existing HTTPS reverse proxy and connect to it with `wss://`.
 
-Example with the **NGINX Home Assistant SSL proxy** add-on:
+Example with the **NGINX Home Assistant SSL proxy** Add-On:
 
-1. In the NGINX add-on configuration, enable custom config files:
+1. In the NGINX Add-On configuration, enable custom config files:
 
    ```yaml
    customize:
@@ -361,7 +362,7 @@ Example with the **NGINX Home Assistant SSL proxy** add-on:
    }
    ```
 
-4. Restart the NGINX add-on.
+4. Restart the NGINX Add-On.
 
 5. In the touchpad card, use the HTTPS WebSocket URL that matches your `location` path:
 
@@ -384,9 +385,12 @@ The first time, Companion asks for permission to change system settings. It open
 The card dims the phone that reports the screen brightness sensor, then restores that brightness. If more than one phone has this sensor enabled, the card does not guess and shows a message instead.
 
 ## Changelog
-- **Card (frontend):** latest v0.17.1 — see [CHANGELOG.md](CHANGELOG.md). Highlights: installation instructions now cover HACS and Marketplace.
-- **Windows backend:** latest v0.5.1 — see [backend/CHANGELOG.md](backend/CHANGELOG.md). Highlights: tray update checks now track the Windows backend version, so card-only releases do not notify Windows users.
-- **webOS add-on:** latest v0.4.1 — see [addon/webos-pointer-bridge/CHANGELOG.md](addon/webos-pointer-bridge/CHANGELOG.md). Highlights: the touchpad port opens before the TV handshake, and pointer input no longer waits on the IME socket.
+- **Card (frontend):** latest `v0.17.1` — see [CHANGELOG.md](CHANGELOG.md). 
+  - **Highlights**: Installation instructions now cover HACS and Marketplace.
+- **Windows Backend:** latest `v0.5.1` — see [backend/CHANGELOG.md](backend/CHANGELOG.md).
+  - **Highlights**: Tray update checks now track the Windows backend version, so card-only releases do not notify Windows users.
+- **webOS Bridge Backend (HA Add-On & Container):** latest `v0.4.1` — see [addon/webos-pointer-bridge/CHANGELOG.md](addon/webos-pointer-bridge/CHANGELOG.md).
+  - **Highlights**: The touchpad port opens before the TV handshake, and pointer input no longer waits on the IME socket.
 
 ## Screenshots
 
