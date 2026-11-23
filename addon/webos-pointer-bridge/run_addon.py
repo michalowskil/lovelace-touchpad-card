@@ -11,7 +11,7 @@ DEFAULT_TV_PORT = 3001
 DEFAULT_USE_SSL = True
 DEFAULT_ORIGIN = None
 DEFAULT_LISTEN_BASE = 8777
-OPTIONS_PATH = Path(os.environ.get("OPTIONS_PATH", "/config/options.json"))
+OPTIONS_PATH = Path(os.environ.get("OPTIONS_PATH", "/data/options.json"))
 KEYS_DIR = Path(os.environ.get("KEYS_DIR", "/data/keys"))
 RETRY_DELAY_SECONDS = 5
 
