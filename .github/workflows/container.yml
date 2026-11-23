@@ -1,9 +1,6 @@
 name: Build webOS Pointer Bridge container
 
 on:
-  push:
-    tags:
-      - 'v*'
   workflow_dispatch:
 
 permissions:
