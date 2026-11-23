@@ -7,8 +7,6 @@ RUN pip install --no-cache-dir websockets==15.0.1 PyYAML==6.0.2
 COPY webos_pointer_bridge.py ./webos_pointer_bridge.py
 COPY run_addon.py ./run_addon.py
 
-RUN chmod +x /opt/webos-bridge/run.sh
-
 ENV OPTIONS_PATH=/config/options.yaml \
     KEYS_DIR=/data/keys
 
