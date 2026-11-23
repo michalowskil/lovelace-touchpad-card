@@ -101,8 +101,8 @@ ghcr.io/michalowskil/lovelace-touchpad-card/webos-pointer-bridge:latest
    Add more entries to the `tvs` array for additional TVs. Each TV must use a
    different `listen_port`. YAML files with either `.yaml` or `.yml` extensions
    are supported, and JSON files are read directly without conversion. The
-   standalone image defaults to `OPTIONS_PATH=/data/options.yaml`; to use JSON,
-   set `-e OPTIONS_PATH=/data/options.json` and mount that file instead.
+   standalone image defaults to `OPTIONS_PATH=/config/options.yaml`; to use JSON,
+   set `-e OPTIONS_PATH=/config/options.json` and mount that file instead.
 2. Start the container and persist its pairing keys:
 
    ```sh
@@ -110,9 +110,9 @@ ghcr.io/michalowskil/lovelace-touchpad-card/webos-pointer-bridge:latest
      --name webos-pointer-bridge \
      --restart unless-stopped \
      -p 8777:8777 \
-     -v "$(pwd)/options.yaml:/data/options.yaml:ro" \
+     -v "$(pwd)/options.yaml:/config/options.yaml:ro" \
      -v webos-pointer-bridge-data:/data \
-     -e OPTIONS_PATH=/data/options.yaml \
+     -e OPTIONS_PATH=/config/options.yaml \
      -e KEYS_DIR=/data/keys \
      ghcr.io/michalowskil/lovelace-touchpad-card/webos-pointer-bridge:latest
    ```
@@ -133,10 +133,10 @@ ghcr.io/michalowskil/lovelace-touchpad-card/webos-pointer-bridge:latest
         ports:
           - "8777:8777"
         volumes:
-          - ./options.yaml:/data/options.yaml:ro
+          - ./options.yaml:/config/options.yaml:ro
           - webos-pointer-bridge-data:/data
         environment:
-          OPTIONS_PATH=/data/options.yaml # Default value, override if want to use a different file name or JSON.
+          OPTIONS_PATH=/config/options.yaml # Default value, override if want to use a different file name or JSON.
           KEYS_DIR=/data/keys # Default value, override if want to use a different path.
        
    volumes:

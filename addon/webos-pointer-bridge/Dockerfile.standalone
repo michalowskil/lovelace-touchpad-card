@@ -9,7 +9,7 @@ COPY run_addon.py ./run_addon.py
 
 RUN chmod +x /opt/webos-bridge/run.sh
 
-ENV OPTIONS_PATH=/data/options.yaml \
+ENV OPTIONS_PATH=/config/options.yaml \
     KEYS_DIR=/data/keys
 
 VOLUME ["/config", "/data"]
