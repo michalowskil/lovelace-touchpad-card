@@ -14,7 +14,6 @@ DEFAULT_LISTEN_BASE = 8777
 OPTIONS_PATH = Path(os.environ.get("OPTIONS_PATH", "/config/options.json"))
 KEYS_DIR = Path(os.environ.get("KEYS_DIR", "/data/keys"))
 RETRY_DELAY_SECONDS = 5
-logger = logging.getLogger(__name__)
 
 
 def load_options() -> list[dict[str, Any]]:
@@ -90,12 +89,12 @@ async def run_bridge(tv_cfg: dict[str, Any]) -> None:
 
     while True:
         try:
-            logger.info("Starting bridge for %s (ws://0.0.0.0:%s -> %s)", name, tv_cfg["listen_port"], tv_cfg["host"])
+            logging.info("Starting bridge for %s (ws://0.0.0.0:%s -> %s)", name, tv_cfg["listen_port"], tv_cfg["host"])  # noqa: LOG015
             await bridge.start()
         except asyncio.CancelledError:
             raise
         except (TimeoutError, OSError) as err:
-            logger.warning(
+            logging.warning( # noqa: LOG015
                 "Bridge for %s could not connect (%s: %s); retrying in %ss",
                 name,
                 type(err).__name__,
@@ -104,7 +103,7 @@ async def run_bridge(tv_cfg: dict[str, Any]) -> None:
             )
             await asyncio.sleep(RETRY_DELAY_SECONDS)
         except Exception:
-            logger.exception("Bridge for %s crashed; retrying in %ss", name, RETRY_DELAY_SECONDS)
+            logging.exception("Bridge for %s crashed; retrying in %ss", name, RETRY_DELAY_SECONDS) # noqa: LOG015
             await asyncio.sleep(RETRY_DELAY_SECONDS)
 
 
@@ -117,11 +116,11 @@ async def main() -> None:
         tvs_raw = load_options()
         configs = build_tv_configs(tvs_raw)
     except Exception:
-        logger.exception("Failed to load add-on options")
+        logging.exception("Failed to load add-on options") # noqa: LOG015
         return
 
     if not configs:
-        logger.warning("No TVs configured; nothing to do.")
+        logging.warning("No TVs configured; nothing to do.") # noqa: LOG015
         await asyncio.Future()
         return
 
