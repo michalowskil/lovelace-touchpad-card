@@ -30,15 +30,24 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Read bridge version
+        id: bridge_version
+        run: |
+          version=$(jq -r '.version' addon/webos-pointer-bridge/config.json)
+          if [ -z "$version" ] || [ "$version" = "null" ]; then
+            echo "version is missing in addon/webos-pointer-bridge/config.json"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
       - name: Extract Docker metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.IMAGE_NAME }}
           tags: |
-            type=ref,event=tag
-            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-beta') }}
-            type=sha
+            type=raw,value=${{ steps.bridge_version.outputs.version }}
+            type=raw,value=latest
 
       - name: Build and push image
         uses: docker/build-push-action@v6
