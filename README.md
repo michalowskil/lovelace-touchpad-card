@@ -81,8 +81,8 @@ Add the card in the UI and configure everything from the visual editor.
 ### Standalone Container
 
 If you do not use Home Assistant Supervisor, run the webOS Pointer Bridge as a
-Docker or Podman container. The image is published automatically for every
-release tag:
+Docker or Podman container. The image is available as `latest` and as a version
+number, for example `0.4.1`:
 
 ```text
 ghcr.io/michalowskil/lovelace-touchpad-card/webos-pointer-bridge:latest
@@ -157,9 +157,8 @@ ghcr.io/michalowskil/lovelace-touchpad-card/webos-pointer-bridge:latest
    `ws://docker-host:8777`). Use `docker logs -f webos-pointer-bridge` to
    monitor the bridge.
 
-The same image supports `linux/amd64` and `linux/arm64`. To pin a release,
-replace `latest` with the corresponding release tag, for example
-`v0.4.1`.
+The same image supports `linux/amd64` and `linux/arm64`. To pin a version,
+replace `latest` with a version number, for example `0.4.1`.
 
 ## Gesture Mode
 
