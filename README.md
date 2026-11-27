@@ -388,8 +388,8 @@ The card dims the phone that reports the screen brightness sensor, then restores
   - **Highlights**: Installation instructions now cover HACS and Marketplace.
 - **Windows Backend:** latest `v0.5.1` — see [backend/CHANGELOG.md](backend/CHANGELOG.md).
   - **Highlights**: Tray update checks now track the Windows backend version, so card-only releases do not notify Windows users.
-- **webOS Bridge Backend (HA Add-On & Container):** latest `v0.4.1` — see [addon/webos-pointer-bridge/CHANGELOG.md](addon/webos-pointer-bridge/CHANGELOG.md).
-  - **Highlights**: The touchpad port opens before the TV handshake, and pointer input no longer waits on the IME socket.
+- **webOS Bridge Backend (HA Add-On & Container):** latest `v0.4.2` — see [addon/webos-pointer-bridge/CHANGELOG.md](addon/webos-pointer-bridge/CHANGELOG.md).
+  - **Highlights**: The bridge no longer uses a full CPU core after the TV disconnects.
 
 ## Screenshots
 

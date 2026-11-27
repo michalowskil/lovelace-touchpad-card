@@ -1,5 +1,8 @@
 # webOS Pointer Bridge Changelog
 
+## 0.4.2
+- Stop the bridge from using a full CPU core after the TV disconnects. A closed socket was treated as still open, so the reconnect loop never waited.
+
 ## 0.4.1
 - Open the touchpad port before the TV handshake, so the card can connect while webOS is still waking up.
 - Do not wait for the optional IME socket before pointer and button input. Some LG TVs answer that request only after about 5 minutes.

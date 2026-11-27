@@ -105,9 +105,9 @@ class WebOSPointerBridge:
             try:
                 await self.ensure_pointer()
                 await self._wait_until_tv_drops()
-                if self._pointer_is_up():
-                    continue
                 logging.warning("webOS connection to %s closed; reconnecting", self.tv_host)
+                async with self._connect_lock:
+                    await self._teardown_pointer()
                 await asyncio.sleep(1)
             except asyncio.CancelledError:
                 raise
@@ -691,7 +691,11 @@ class WebOSPointerBridge:
     def _is_closed(conn: ClientConnection) -> bool:
         state = getattr(conn, "state", None)
         if state is not None:
-            return str(state).lower().endswith("closed")
+            name = getattr(state, "name", "")
+            if name:
+                return name in {"CLOSING", "CLOSED"}
+            text = str(state).lower()
+            return text.endswith("closed") or text.endswith("closing")
         return bool(getattr(conn, "closed", False) or getattr(conn, "closing_exc", None))
 
     def _origin_header(self, send_default: bool = True) -> str | None:
